@@ -1,0 +1,169 @@
+[00:00:02.609] Server  LOG     ✓ Ready in 1859ms
+[00:00:07.657] Server  WARN    ⚠ metadataBase property in metadata export is not set for resolving social open graph or twitter images, using "http://localhost:3000". See https://nextjs.org/docs/app/api-reference/functions/generate-metadata#metadatabase
+[00:00:08.131] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:00:08.903] Browser LOG     %c[Vercel Speed Insights]%c Debug mode is enabled by default in development. No requests will be sent to the server. color: rgb(120, 120, 120) color: inherit
+[00:00:08.903] Browser LOG     %c[Vercel Web Analytics]%c Debug mode is enabled by default in development. No requests will be sent to the server. color: rgb(120, 120, 120) color: inherit
+[00:00:08.903] Browser LOG     %c[Vercel Web Analytics]%c Running queued event color: rgb(120, 120, 120) color: inherit pageview {"path":"/","route":"/"}
+[00:00:08.903] Browser LOG     %c[Vercel Web Analytics]%c [view] http://localhost:3000/ color: rgb(120, 120, 120) color: inherit {"dp":"/","o":"http://localhost:3000/","r":"","sdkn":"@vercel/analytics/next","sdkv":"1.6.1","sv":"0.1.3","ts":1772436471457} /_vercel/insights/view
+[00:00:10.095] Browser LOG     %c[Vercel Speed Insights]%c [vitals] color: rgb(120, 120, 120) color: inherit {"metrics":[{"href":"http://localhost:3000/","id":"v3-1772436471453-2600648793679","route":"/","type":"FCP","value":2676},{"href":"http://localhost:3000/","id":"v3-1772436471453-2263533920149","route":"/","type":"TTFB","value":2491}],"scriptVersion":"0.1.3","sdkName":"@vercel/speed-insights/next","sdkVersion":"1.3.1","speed":"4g"} /_vercel/speed-insights/vitals
+[00:00:10.095] Browser LOG     %c[Vercel Web Analytics]%c [view] http://localhost:3000/chat color: rgb(120, 120, 120) color: inherit {"dp":"/chat","o":"http://localhost:3000/chat","sdkn":"@vercel/analytics/next","sdkv":"1.6.1","sv":"0.1.3","ts":1772436472645} /_vercel/insights/view
+[00:00:10.606] Browser LOG     Loading chat history on chat page for user: ea020f3a-b798-4400-831a-36d5e553af97
+[00:00:10.792] Browser LOG     Loading chat history on chat page for user: ea020f3a-b798-4400-831a-36d5e553af97
+[00:00:12.081] Browser LOG     Chat history loaded: 1 conversations
+[00:00:12.081] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:12.081] Browser LOG     Chat history loaded: 1 conversations
+[00:00:12.081] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:12.081] Browser LOG     Chat history loaded: 1 conversations
+[00:00:12.081] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:12.081] Browser LOG     Chat history loaded: 1 conversations
+[00:00:12.081] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:12.342] Browser LOG     Loading chat history on chat page for user: ea020f3a-b798-4400-831a-36d5e553af97
+[00:00:12.342] Browser LOG     Chat history loaded: 1 conversations
+[00:00:12.342] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:13.199] Browser LOG     %c[Vercel Speed Insights]%c [vitals] color: rgb(120, 120, 120) color: inherit {"metrics":[{"attribution":{"eventTarget":""},"href":"http://localhost:3000/chat","id":"v3-1772436471453-9092897836715","route":"/chat","type":"LCP","value":2676},{"attribution":{"eventTarget":"span.text-sm.truncate.flex-1","eventType":"pointerdown"},"href":"http://localhost:3000/chat","id":"v3-1772436471453-1184627393621","route":"/chat","type":"FID","value":1.69}],"scriptVersion":"0.1.3","sdkName":"@vercel/speed-insights/next","sdkVersion":"1.3.1","speed":"4g"} /_vercel/speed-insights/vitals
+[00:00:13.309] Server  LOG     [chat/load] User authenticated: "ea020f3a-b798-4400-831a-36d5e553af97"
+[00:00:13.403] Browser LOG     Chat history loaded: 1 conversations
+[00:00:13.403] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:16.551] Browser LOG     Chat history loaded: 1 conversations
+[00:00:16.551] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:19.366] Browser LOG     Chat history loaded: 1 conversations
+[00:00:19.366] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:22.360] Browser LOG     Chat history loaded: 1 conversations
+[00:00:22.360] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:23.766] Browser LOG     %c[Vercel Speed Insights]%c [vitals] color: rgb(120, 120, 120) color: inherit {"metrics":[{"attribution":{"eventTarget":"span.text-sm.truncate.flex-1","eventType":"pointerdown"},"href":"http://localhost:3000/chat?id=248ff16a-9b60-4211-af7e-69630595987c","id":"v3-1772436471453-9670214074914","route":"/chat","type":"INP","value":0},{"attribution":{"eventTarget":"div.p-4.border-t.border-gray-200.space-y-2"},"href":"http://localhost:3000/chat?id=248ff16a-9b60-4211-af7e-69630595987c","id":"v3-1772436471454-8488561274391","route":"/chat","type":"CLS","value":0}],"scriptVersion":"0.1.3","sdkName":"@vercel/speed-insights/next","sdkVersion":"1.3.1","speed":"4g"} /_vercel/speed-insights/vitals
+[00:00:26.774] Browser LOG     Chat history loaded: 1 conversations
+[00:00:26.774] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:29.761] Browser LOG     Chat history loaded: 1 conversations
+[00:00:29.761] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:32.767] Browser LOG     Chat history loaded: 1 conversations
+[00:00:32.767] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:35.766] Browser LOG     Chat history loaded: 1 conversations
+[00:00:35.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:38.766] Browser LOG     Chat history loaded: 1 conversations
+[00:00:38.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:41.768] Browser LOG     Chat history loaded: 1 conversations
+[00:00:41.768] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:44.761] Browser LOG     Chat history loaded: 1 conversations
+[00:00:44.761] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:47.762] Browser LOG     Chat history loaded: 1 conversations
+[00:00:47.762] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:50.768] Browser LOG     Chat history loaded: 1 conversations
+[00:00:50.768] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:53.762] Browser LOG     Chat history loaded: 1 conversations
+[00:00:53.762] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:56.769] Browser LOG     Chat history loaded: 1 conversations
+[00:00:56.769] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:00:59.762] Browser LOG     Chat history loaded: 1 conversations
+[00:00:59.762] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:02.767] Browser LOG     Chat history loaded: 1 conversations
+[00:01:02.768] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:05.760] Browser LOG     Chat history loaded: 1 conversations
+[00:01:05.760] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:08.774] Browser LOG     Chat history loaded: 1 conversations
+[00:01:08.774] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:11.766] Browser LOG     Chat history loaded: 1 conversations
+[00:01:11.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:14.772] Browser LOG     Chat history loaded: 1 conversations
+[00:01:14.772] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:17.763] Browser LOG     Chat history loaded: 1 conversations
+[00:01:17.763] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:20.771] Browser LOG     Chat history loaded: 1 conversations
+[00:01:20.771] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:23.775] Browser LOG     Chat history loaded: 1 conversations
+[00:01:23.775] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:01:32.759] Browser LOG     Chat history loaded: 1 conversations
+[00:01:32.759] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:02:33.761] Browser LOG     Chat history loaded: 1 conversations
+[00:02:33.761] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:03:32.765] Browser LOG     Chat history loaded: 1 conversations
+[00:03:32.765] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:04:32.767] Browser LOG     Chat history loaded: 1 conversations
+[00:04:32.767] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:05:32.771] Browser LOG     Chat history loaded: 1 conversations
+[00:05:32.771] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:06:32.766] Browser LOG     Chat history loaded: 1 conversations
+[00:06:32.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:07:32.767] Browser LOG     Chat history loaded: 1 conversations
+[00:07:32.767] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:08:32.766] Browser LOG     Chat history loaded: 1 conversations
+[00:08:32.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:09:32.773] Browser LOG     Chat history loaded: 1 conversations
+[00:09:32.773] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:10:32.768] Browser LOG     Chat history loaded: 1 conversations
+[00:10:32.768] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:18.550] Browser LOG     Chat history loaded: 1 conversations
+[00:11:18.550] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:19.365] Browser LOG     Chat history loaded: 1 conversations
+[00:11:19.365] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:23.764] Browser LOG     Chat history loaded: 1 conversations
+[00:11:23.764] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:26.769] Browser LOG     Chat history loaded: 1 conversations
+[00:11:26.769] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:29.763] Browser LOG     Chat history loaded: 1 conversations
+[00:11:29.763] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:32.762] Browser LOG     Chat history loaded: 1 conversations
+[00:11:32.762] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:35.768] Browser LOG     Chat history loaded: 1 conversations
+[00:11:35.768] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:38.772] Browser LOG     Chat history loaded: 1 conversations
+[00:11:38.772] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:41.773] Browser LOG     Chat history loaded: 1 conversations
+[00:11:41.773] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:44.769] Browser LOG     Chat history loaded: 1 conversations
+[00:11:44.769] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:47.766] Browser LOG     Chat history loaded: 1 conversations
+[00:11:47.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:50.760] Browser LOG     Chat history loaded: 1 conversations
+[00:11:50.760] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:53.769] Browser LOG     Chat history loaded: 1 conversations
+[00:11:53.770] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:56.765] Browser LOG     Chat history loaded: 1 conversations
+[00:11:56.765] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:11:59.770] Browser LOG     Chat history loaded: 1 conversations
+[00:11:59.770] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:02.771] Browser LOG     Chat history loaded: 1 conversations
+[00:12:02.771] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:05.769] Browser LOG     Chat history loaded: 1 conversations
+[00:12:05.769] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:08.765] Browser LOG     Chat history loaded: 1 conversations
+[00:12:08.765] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:11.765] Browser LOG     Chat history loaded: 1 conversations
+[00:12:11.765] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:14.770] Browser LOG     Chat history loaded: 1 conversations
+[00:12:14.770] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:17.766] Browser LOG     Chat history loaded: 1 conversations
+[00:12:17.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:20.772] Browser LOG     Chat history loaded: 1 conversations
+[00:12:20.772] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:12:32.770] Browser LOG     Chat history loaded: 1 conversations
+[00:12:32.770] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:13:32.764] Browser LOG     Chat history loaded: 1 conversations
+[00:13:32.764] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:14:32.762] Browser LOG     Chat history loaded: 1 conversations
+[00:14:32.762] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:15:32.769] Browser LOG     Chat history loaded: 1 conversations
+[00:15:32.770] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:16:32.770] Browser LOG     Chat history loaded: 1 conversations
+[00:16:32.770] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:17:32.774] Browser LOG     Chat history loaded: 1 conversations
+[00:17:32.774] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:18:32.769] Browser LOG     Chat history loaded: 1 conversations
+[00:18:32.770] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:19:32.771] Browser LOG     Chat history loaded: 1 conversations
+[00:19:32.771] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:20:32.761] Browser LOG     Chat history loaded: 1 conversations
+[00:20:32.762] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:21:32.765] Browser LOG     Chat history loaded: 1 conversations
+[00:21:32.765] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:22:32.773] Browser LOG     Chat history loaded: 1 conversations
+[00:22:32.773] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:23:32.766] Browser LOG     Chat history loaded: 1 conversations
+[00:23:32.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:24:32.760] Browser LOG     Chat history loaded: 1 conversations
+[00:24:32.760] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:25:32.766] Browser LOG     Chat history loaded: 1 conversations
+[00:25:32.766] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:26:32.771] Browser LOG     Chat history loaded: 1 conversations
+[00:26:32.771] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]
+[00:27:32.767] Browser LOG     Chat history loaded: 1 conversations
+[00:27:32.767] Browser LOG     Conversations: [{"created_at":"2026-03-02T03:45:42.882518+00:00","id":"248ff16a-9b60-4211-af7e-69630595987c","title":"Meaning of Agency in AI\nDefinition:\nAgency in AI r","updated_at":"2026-03-02T03:50:53.834+00:00"}]

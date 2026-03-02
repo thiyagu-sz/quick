@@ -1,0 +1,1045 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import mammoth from 'mammoth';
+
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+const ALLOWED_TYPES = [
+  'application/pdf',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
+
+interface Chunk {
+  content: string;
+  start: number;
+  end: number;
+}
+
+function chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): Chunk[] {
+  const chunks: Chunk[] = [];
+  let start = 0;
+
+  while (start < text.length) {
+    const end = Math.min(start + chunkSize, text.length);
+    chunks.push({
+      content: text.substring(start, end),
+      start,
+      end,
+    });
+    start = end - overlap;
+  }
+
+  return chunks;
+}
+
+async function extractTextFromFile(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const fileType = file.type;
+  const fileName = file.name.toLowerCase();
+
+  console.log(`Extracting text from file: ${file.name}, type: ${fileType}`);
+
+  try {
+    if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+      // Try multiple methods to load pdfjs-dist
+      try {
+        let pdfjs: any = null;
+        
+        // Method 1: Try dynamic import with main module
+        try {
+          const pdfjsModule = await import('pdfjs-dist');
+          pdfjs = (pdfjsModule as any).default || pdfjsModule;
+          if (pdfjs && pdfjs.getDocument) {
+            console.log('✅ Loaded pdfjs-dist via main import');
+          }
+        } catch (importError) {
+          console.log('Main import failed, trying legacy build...');
+        }
+        
+        // Method 2: Try legacy build with dynamic import
+        if (!pdfjs || !pdfjs.getDocument) {
+          try {
+            const legacyModule = await import('pdfjs-dist/legacy/build/pdf.mjs');
+            pdfjs = (legacyModule as any).default || legacyModule;
+            if (pdfjs && pdfjs.getDocument) {
+              console.log('✅ Loaded pdfjs-dist via legacy .mjs');
+            }
+          } catch (mjsError) {
+            console.log('Legacy .mjs import failed, trying .js...');
+          }
+        }
+        
+        // Method 3: Try require with createRequire (for CommonJS)
+        if (!pdfjs || !pdfjs.getDocument) {
+          try {
+            const { createRequire } = await import('module');
+            const require = createRequire(import.meta.url);
+            // Try different paths
+            const paths = [
+              'pdfjs-dist/legacy/build/pdf.js',
+              'pdfjs-dist/build/pdf.js',
+              'pdfjs-dist',
+            ];
+            
+            for (const path of paths) {
+              try {
+                pdfjs = require(path);
+                if (pdfjs && pdfjs.getDocument) {
+                  console.log(`✅ Loaded pdfjs-dist via require: ${path}`);
+                  break;
+                }
+              } catch (reqError) {
+                // Try next path
+                continue;
+              }
+            }
+          } catch (requireError) {
+            console.log('Require method failed');
+          }
+        }
+        
+        if (!pdfjs || !pdfjs.getDocument) {
+          throw new Error('Could not load pdfjs-dist. Tried multiple import methods.');
+        }
+        
+        // Load the PDF document
+        const loadingTask = pdfjs.getDocument({
+          data: new Uint8Array(buffer),
+          useSystemFonts: true,
+          verbosity: 0, // Suppress warnings
+        });
+        
+        const pdfDocument = await loadingTask.promise;
+        const numPages = pdfDocument.numPages;
+        
+        console.log(`📄 PDF loaded: ${numPages} pages`);
+        
+        // Extract text from all pages
+        let fullText = '';
+        
+        for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+          const page = await pdfDocument.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          
+          // Combine all text items from the page
+          const pageText = textContent.items
+            .map((item: any) => item.str || '')
+            .join(' ');
+          
+          fullText += pageText + '\n\n';
+        }
+        
+        if (!fullText || fullText.trim().length === 0) {
+          throw new Error('PDF appears to be empty or contains no extractable text');
+        }
+        
+        console.log(`✅ Extracted ${fullText.length} characters from PDF`);
+        return fullText.trim();
+      } catch (parseError) {
+        console.error('Error parsing PDF with pdfjs-dist:', parseError);
+        
+        // Fallback 1: Try pdf2json (simpler, more reliable)
+        try {
+          console.log('Attempting fallback with pdf2json...');
+          const { createRequire } = await import('module');
+          const require = createRequire(import.meta.url);
+          const PDFParser = require('pdf2json');
+          
+          return new Promise((resolve, reject) => {
+            const pdfParser = new PDFParser(null, 1);
+            
+            pdfParser.on('pdfParser_dataError', (errData: any) => {
+              console.error('pdf2json parse error:', errData);
+              reject(new Error(`PDF parsing error: ${errData.parserError}`));
+            });
+            
+            pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
+              try {
+                // Extract text from all pages
+                let fullText = '';
+                if (pdfData.Pages && pdfData.Pages.length > 0) {
+                  for (const page of pdfData.Pages) {
+                    if (page.Texts && page.Texts.length > 0) {
+                      for (const textItem of page.Texts) {
+                        if (textItem.R && textItem.R.length > 0) {
+                          for (const run of textItem.R) {
+                            if (run.T) {
+                              // Decode URI component if needed
+                              try {
+                                fullText += decodeURIComponent(run.T) + ' ';
+                              } catch {
+                                fullText += run.T + ' ';
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                
+                if (!fullText || fullText.trim().length === 0) {
+                  reject(new Error('PDF appears to be empty or contains no extractable text'));
+                } else {
+                  console.log(`✅ Extracted ${fullText.length} characters using pdf2json`);
+                  resolve(fullText.trim());
+                }
+              } catch (extractError) {
+                reject(extractError);
+              }
+            });
+            
+            // Parse the buffer
+            pdfParser.parseBuffer(Buffer.from(buffer));
+          });
+        } catch (pdf2jsonError) {
+          console.error('pdf2json also failed:', pdf2jsonError);
+          
+          // Fallback 2: Try pdf-parse as last resort
+          try {
+            console.log('Attempting final fallback with pdf-parse...');
+            const { createRequire } = await import('module');
+            const require = createRequire(import.meta.url);
+            const pdfParseLib = require('pdf-parse');
+            
+            // Try to use PDFParse class if available
+            if (pdfParseLib.PDFParse && typeof pdfParseLib.PDFParse === 'function') {
+              // PDFParse is a class - we need to check if it can be called or needs instantiation
+              // Some versions export it as a callable class
+              try {
+                const result = await new Promise((resolve, reject) => {
+                  // Try calling as constructor with callback
+                  const parser = new pdfParseLib.PDFParse(Buffer.from(buffer), (err: any, data: any) => {
+                    if (err) reject(err);
+                    else resolve(data);
+                  });
+                  
+                  // If no callback pattern, try direct instantiation
+                  if (!parser || typeof parser !== 'object') {
+                    // Try synchronous approach
+                    try {
+                      const directResult = new pdfParseLib.PDFParse(Buffer.from(buffer));
+                      if (directResult && directResult.text) {
+                        resolve(directResult);
+                      } else {
+                        // Wait a bit and check again
+                        setTimeout(() => {
+                          if (directResult && directResult.text) {
+                            resolve(directResult);
+                          } else {
+                            reject(new Error('PDFParse did not return text'));
+                          }
+                        }, 100);
+                      }
+                    } catch (syncError) {
+                      reject(syncError);
+                    }
+                  }
+                });
+                
+                const text = (result as any)?.text || '';
+                if (text && text.trim().length > 0) {
+                  return text;
+                }
+              } catch (classError) {
+                console.error('PDFParse class instantiation failed:', classError);
+              }
+            }
+            
+            // Last resort: try default export
+            const pdfParseFn = pdfParseLib.default || pdfParseLib;
+            if (typeof pdfParseFn === 'function') {
+              const data = await pdfParseFn(Buffer.from(buffer));
+              const text = data?.text || '';
+              if (text && text.trim().length > 0) {
+                return text;
+              }
+            }
+          } catch (fallbackError) {
+            console.error('Fallback pdf-parse also failed:', fallbackError);
+          }
+          
+          throw new Error(`Failed to parse PDF: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+        }
+      }
+    } else if (fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
+      const result = await mammoth.extractRawText({ buffer: Buffer.from(buffer) });
+      const text = result.value || '';
+      if (text.trim().length === 0) {
+        throw new Error('DOCX file appears to be empty or contains no extractable text');
+      }
+      return text;
+    } else if (
+      fileType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+      fileType === 'application/vnd.ms-powerpoint' ||
+      fileName.endsWith('.pptx') ||
+      fileName.endsWith('.ppt')
+    ) {
+      // For PPTX/PPT, return a basic placeholder - full extraction would require additional libraries
+      return `[PowerPoint file: ${file.name}]\n\nNote: Full text extraction from PowerPoint files requires additional processing. The file has been uploaded but detailed text extraction is not available for this format.`;
+    } else if (fileName.endsWith('.doc')) {
+      // Old DOC format - not fully supported
+      return `[Word Document: ${file.name}]\n\nNote: Old .doc format is not fully supported. Please convert to .docx for better text extraction.`;
+    } else if (fileName.endsWith('.txt')) {
+      // Plain text file
+      const decoder = new TextDecoder('utf-8');
+      return decoder.decode(buffer);
+    }
+
+    throw new Error(`Unsupported file type: ${fileType || 'unknown'}. Supported: PDF, DOCX, PPTX, TXT`);
+  } catch (error) {
+    console.error(`Error in extractTextFromFile for ${file.name}:`, error);
+    throw error;
+  }
+}
+
+async function generateEmbedding(text: string): Promise<number[]> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  
+  if (!apiKey) {
+    console.warn('OpenAI API key not found. Using simple text-based embedding fallback.');
+    // Return a simple hash-based embedding (not ideal but works for basic functionality)
+    const hash = text.split('').reduce((acc, char) => {
+      const hash = ((acc << 5) - acc) + char.charCodeAt(0);
+      return hash & hash;
+    }, 0);
+    // Return a 384-dimensional vector (common embedding size) based on text hash
+    const embedding = new Array(384).fill(0).map((_, i) => 
+      Math.sin((hash + i) * 0.1) * 0.1
+    );
+    return embedding;
+  }
+
+  const response = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'text-embedding-3-small',
+      input: text,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to generate embedding');
+  }
+
+  const data = await response.json();
+  return data.data[0].embedding;
+}
+
+type FormatType = 'key-points' | 'main-concepts' | 'exam-points' | 'short-notes' | 'speech-notes' | 'presentation-notes' | 'summary' | 'mcqs' | 'quick-test';
+
+// Rate limiting and retry logic
+const MAX_RETRIES = 5;
+const INITIAL_RETRY_DELAY = 2000; // 2 seconds
+const MAX_RETRY_DELAY = 30000; // 30 seconds
+
+async function sleepMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function callGeminiAPI(
+  messages: any[],
+  options: any = {}
+) {
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY?.trim();
+  
+  if (!apiKey) {
+    throw new Error('Google Gemini API key not found');
+  }
+
+  let lastError: any = null;
+  let retryDelay = INITIAL_RETRY_DELAY;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // Convert OpenRouter message format to Gemini format
+      const contents = messages.map((msg: any) => ({
+        role: msg.role === 'system' ? 'user' : msg.role,
+        parts: [{ text: msg.content }]
+      }));
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents,
+          generationConfig: {
+            temperature: options.temperature || 0.3,
+            maxOutputTokens: options.maxTokens || 2000,
+            topK: 40,
+            topP: 0.95,
+          },
+        }),
+      });
+
+      // Check for rate limiting
+      if (response.status === 429) {
+        lastError = new Error('Rate limit exceeded');
+        
+        // Extract retry-after header if available
+        const retryAfter = response.headers.get('retry-after');
+        // Parse retry-after: could be seconds (number) or HTTP-date
+        let delayMs = retryDelay;
+        if (retryAfter) {
+          const retryAfterNum = parseInt(retryAfter);
+          if (!isNaN(retryAfterNum)) {
+            // If it's a small number, assume it's seconds; otherwise milliseconds
+            delayMs = retryAfterNum > 100 ? retryAfterNum : retryAfterNum * 1000;
+          }
+        }
+        // Add jitter to avoid thundering herd
+        const jitter = Math.random() * 1000;
+        delayMs = Math.min(delayMs + jitter, MAX_RETRY_DELAY);
+        
+        if (attempt < MAX_RETRIES) {
+          console.warn(`⚠️ Rate limit hit (429). Attempt ${attempt}/${MAX_RETRIES}. Waiting ${Math.round(delayMs)}ms before retry...`);
+          await sleepMs(delayMs);
+          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY); // Exponential backoff
+          continue;
+        }
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Google Gemini API error (attempt ${attempt}/${MAX_RETRIES}):`, response.status, errorText);
+        
+        lastError = new Error(`API error ${response.status}: ${errorText.substring(0, 200)}`);
+        
+        // Don't retry on auth errors
+        if (response.status === 401) {
+          throw lastError;
+        }
+        
+        // Retry on 5xx errors
+        if (response.status >= 500 && attempt < MAX_RETRIES) {
+          console.warn(`⚠️ Server error ${response.status}. Attempt ${attempt}/${MAX_RETRIES}. Retrying...`);
+          await sleepMs(retryDelay);
+          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
+          continue;
+        }
+        
+        throw lastError;
+      }
+
+      return response;
+    } catch (error) {
+      lastError = error;
+      
+      if (attempt < MAX_RETRIES) {
+        console.warn(`⚠️ Error on attempt ${attempt}/${MAX_RETRIES}. Retrying...`, error);
+        await sleepMs(retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
+        continue;
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to call Google Gemini API after max retries');
+}
+
+function generateFormatPrompt(format: FormatType, wordCount: number): { systemPrompt: string; userPromptPrefix: string } {
+  const formatPrompts: Record<FormatType, { systemPrompt: string; userPromptPrefix: string }> = {
+    'key-points': {
+      systemPrompt: `You are an expert study assistant. Extract and organize KEY POINTS from study materials.
+
+REQUIREMENTS:
+- Use markdown formatting (# for headings, - for bullet points)
+- Focus ONLY on the most important information
+- Use clear headings (##) to organize sections
+- Use bullet points (-) for key points
+- Use **bold** for important terms
+- Keep paragraphs short (max 2-3 sentences)
+- Limit to EXACTLY ${wordCount} words
+- Structure: Main Topic → Key Points → Important Details
+- Make it exam-friendly and readable`,
+      userPromptPrefix: 'Extract and organize KEY POINTS from this study material. Focus on the most important information only:'
+    },
+    'main-concepts': {
+      systemPrompt: `You are an expert study assistant. Identify and explain the MAIN CONCEPTS from study materials.
+
+REQUIREMENTS:
+- Use markdown formatting (# for headings, - for lists)
+- Provide clear definitions and explanations
+- Use headings (##) for each main concept
+- Use bullet points for supporting details
+- Use **bold** for key terms and definitions
+- Keep it structured and organized
+- Limit to EXACTLY ${wordCount} words
+- Make content clear and exam-friendly`,
+      userPromptPrefix: 'Identify and explain the MAIN CONCEPTS from this study material:'
+    },
+    'exam-points': {
+      systemPrompt: `You are an expert study assistant. Create EXAM-FOCUSED NOTES from study materials.
+
+REQUIREMENTS:
+- Use markdown formatting (# for headings, - for bullet points)
+- Highlight information likely to appear in exams
+- Include definitions, formulas, dates, names, and key facts
+- Use headings (##) to organize by topic
+- Use bullet points for key facts
+- Use **bold** for important terms
+- Keep paragraphs very short
+- Limit to EXACTLY ${wordCount} words
+- Structure for quick review and memorization`,
+      userPromptPrefix: 'Create EXAM-FOCUSED NOTES from this study material:'
+    },
+    'short-notes': {
+      systemPrompt: `You are an expert study assistant. Create SHORT NOTES from study materials.
+
+REQUIREMENTS:
+- Use markdown formatting (# for headings, - for bullet points)
+- Keep it concise and organized
+- Use clear headings (##) for sections
+- Use bullet points for key information
+- Focus on essential information only
+- Limit to EXACTLY ${wordCount} words
+- Make it easy to scan and review`,
+      userPromptPrefix: 'Create SHORT NOTES from this study material:'
+    },
+    'speech-notes': {
+      systemPrompt: `You are an expert study assistant. Create SPEECH NOTES from study materials.
+
+REQUIREMENTS:
+- Use markdown formatting (# for headings, - for bullet points)
+- Structure for verbal presentation
+- Use headings (##) for main sections
+- Use bullet points for talking points
+- Keep it conversational and easy to follow
+- Use **bold** for emphasis points
+- Limit to EXACTLY ${wordCount} words
+- Make it suitable for speaking`,
+      userPromptPrefix: 'Create SPEECH NOTES from this study material:'
+    },
+    'presentation-notes': {
+      systemPrompt: `You are an expert study assistant. Create PRESENTATION NOTES from study materials.
+
+REQUIREMENTS:
+- Use markdown formatting (# for headings, - for bullet points)
+- Structure for slide-by-slide presentation
+- Use headings (##) for each slide topic
+- Use bullet points for slide content
+- Keep points concise and visual
+- Use **bold** for emphasis
+- Limit to EXACTLY ${wordCount} words
+- Make it suitable for presenting`,
+      userPromptPrefix: 'Create PRESENTATION NOTES from this study material:'
+    },
+    'summary': {
+      systemPrompt: `You are an expert study assistant. Create a comprehensive SUMMARY from study materials.
+
+REQUIREMENTS:
+- Use markdown formatting (# for headings, - for bullet points)
+- Provide a comprehensive overview
+- Use clear headings (##) for major sections
+- Use bullet points for key information
+- Balance detail with conciseness
+- Use **bold** for important concepts
+- Limit to EXACTLY ${wordCount} words
+- Make it complete yet readable`,
+      userPromptPrefix: 'Create a comprehensive SUMMARY from this study material:'
+    },
+    'mcqs': {
+      systemPrompt: `You are an expert exam preparation assistant.
+
+Your task is to generate Multiple Choice Questions (MCQs) strictly based on the provided study material.
+
+RULES:
+- Do NOT introduce information outside the given content
+- Questions must be exam-oriented and concept-focused
+- Difficulty level: Medium (college / university exams)
+- Avoid ambiguous or opinion-based questions
+- IF including tables: use clean markdown format ONLY
+
+FORMAT REQUIREMENTS:
+- Each question must have exactly 4 options (A–D)
+- Use clean, vertical layout (one option per line)
+- Clearly mark the correct answer
+- Provide a brief explanation
+
+STRUCTURE:
+## Multiple Choice Questions (MCQs)
+
+Q1. Question text here?
+A. Option A
+B. Option B
+C. Option C
+D. Option D
+
+Correct Answer: A
+Explanation: Brief explanation of why this is correct.
+
+---
+
+Q2. Next question?
+A. Option A
+B. Option B
+C. Option C
+D. Option D
+
+Correct Answer: B
+Explanation: Brief explanation here.
+
+IF YOU NEED TO INCLUDE A COMPARISON TABLE:
+
+| Column 1 | Column 2 | Column 3 |
+|----------|----------|----------|
+| Data | Data | Data |
+| Data | Data | Data |
+
+IMPORTANT TABLE RULES:
+- Use pipes (|) and dashes (-) ONLY for table structure
+- Clean rows with equal spacing
+- NO extra symbols, colons, or dashes outside table
+- NO messy alignment characters
+
+DO NOT USE THESE FORMATS:
+✗ Messy alignment: | :--- | :--- | :--- |
+✗ Extra pipes: ||| Data ||| More Data |||
+✗ Unequal spacing between rows
+✗ Extra colons or dashes: |: Data :| or |--- Data ---|
+✗ Box-drawing characters: ╔║╚╝╠╣╦╩
+
+CONSTRAINTS:
+- Generate exactly ${wordCount} MCQs
+- Do not repeat questions
+- Keep explanations concise
+- Use Q1, Q2, Q3... numbering
+- Use A. B. C. D. format for options
+- CLEAN formatting: no extra characters or symbols`,
+      userPromptPrefix: 'Generate exam-focused MCQs from this study material:'
+    },
+    'quick-test': {
+      systemPrompt: 'Quick Test mode - handled separately',
+      userPromptPrefix: 'Quick Test mode - handled separately'
+    },
+  };
+
+  return formatPrompts[format] || formatPrompts['key-points'];
+}
+
+async function generateAINotes(text: string, outputType: FormatType = 'key-points', wordCount: number = 100): Promise<string> {
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY?.trim();
+  
+  if (!apiKey) {
+    console.warn('Google Gemini API key not found. Using placeholder notes.');
+    return `# Key Study Notes\n\n## Important Points\n\n${text.substring(0, 500)}...\n\n*Note: AI note generation requires Google Gemini API key.*`;
+  }
+
+  try {
+    // Limit text to avoid token limits and memory issues
+    // Reduced from 12000 to 8000 to prevent memory problems
+    const textToProcess = text.length > 8000 ? text.substring(0, 8000) + '\n\n[Content truncated for processing...]' : text;
+    
+    // Get format-specific prompts
+    const { systemPrompt, userPromptPrefix } = generateFormatPrompt(outputType, wordCount);
+    
+    const response = await callGeminiAPI([
+      {
+        role: 'system',
+        content: systemPrompt,
+      },
+      {
+        role: 'user',
+        content: `${userPromptPrefix}\n\n${textToProcess}`,
+      },
+    ], {
+      temperature: 0.3,
+      maxTokens: 2000,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Google Gemini API error:', response.status, errorText);
+      // Fallback to structured summary
+      return `# Key Study Notes\n\n## Summary\n\n${text.substring(0, 1500)}...\n\n*Note: AI generation failed. Showing text summary.*`;
+    }
+
+    const data = await response.json();
+    const generatedNotes = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!generatedNotes || generatedNotes.trim().length === 0) {
+      console.warn('AI returned empty notes, using fallback');
+      return `# Key Study Notes\n\n## Important Points\n\n${text.substring(0, 1500)}...`;
+    }
+    
+    return generatedNotes;
+  } catch (error) {
+    console.error('Error generating AI notes:', error);
+    return `# Key Study Notes\n\n## Summary\n\n${text.substring(0, 1500)}...\n\n*Note: Error generating AI notes. Showing text summary.*`;
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json({ error: 'Missing Supabase configuration' }, { status: 500 });
+    }
+
+    // Try to get auth token from Authorization header first (from client)
+    const authHeader = request.headers.get('Authorization');
+    let user = null;
+    let authError = null;
+    let supabase;
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      // Use token from header
+      const token = authHeader.substring(7);
+      supabase = createClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      });
+      const { data: { user: tokenUser }, error: tokenError } = await supabase.auth.getUser();
+      user = tokenUser;
+      authError = tokenError;
+    } else {
+      // Fallback to cookies - create client without cookie options (will use default)
+      supabase = createClient(supabaseUrl, supabaseAnonKey);
+      const result = await supabase.auth.getUser();
+      user = result.data.user;
+      authError = result.error;
+    }
+
+    if (authError) {
+      console.error('Auth error:', authError.message);
+      return NextResponse.json({ error: `Authentication failed: ${authError.message}` }, { status: 401 });
+    }
+
+    if (!user) {
+      console.error('No user found - user not authenticated');
+      return NextResponse.json({ error: 'Please log in to upload files' }, { status: 401 });
+    }
+
+    const formData = await request.formData();
+    const collectionName = formData.get('collectionName') as string;
+    const files = formData.getAll('files') as File[];
+    const outputType = (formData.get('outputType') as FormatType) || 'key-points';
+    const wordCount = parseInt(formData.get('wordCount') as string) || 100;
+
+    if (!collectionName || !collectionName.trim()) {
+      return NextResponse.json({ error: 'Collection name is required' }, { status: 400 });
+    }
+
+    if (!files || files.length === 0) {
+      return NextResponse.json({ error: 'No files provided' }, { status: 400 });
+    }
+
+    if (files.length > 10) {
+      return NextResponse.json({ error: 'Maximum 10 files allowed' }, { status: 400 });
+    }
+
+    // Validate all files
+    for (const file of files) {
+      if (file.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: `File ${file.name} exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit` },
+          { status: 400 }
+        );
+      }
+
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        return NextResponse.json(
+          { error: `File ${file.name} is not a supported format. Please upload PDF, PPT, PPTX, or DOCX files.` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Create collection
+    const { data: collectionData, error: collectionError } = await supabase
+      .from('collections')
+      .insert({
+        user_id: user.id,
+        name: collectionName.trim(),
+      })
+      .select()
+      .single();
+
+    if (collectionError) {
+      console.error('Collection creation error:', collectionError);
+      return NextResponse.json(
+        { error: 'Failed to create collection' },
+        { status: 500 }
+      );
+    }
+
+    // Process all files
+    const allExtractedText: string[] = [];
+    const uploadedDocuments: any[] = [];
+    const extractionErrors: string[] = [];
+
+    for (const file of files) {
+      try {
+        console.log(`📄 Processing file: ${file.name} (${file.type}, ${file.size} bytes)`);
+        
+        // Extract text from file
+        let extractedText: string;
+        try {
+          extractedText = await extractTextFromFile(file);
+          console.log(`✅ Extracted ${extractedText.length} characters from ${file.name}`);
+        } catch (extractError) {
+          const errorMsg = extractError instanceof Error ? extractError.message : String(extractError);
+          console.error(`❌ Error extracting text from ${file.name}:`, errorMsg);
+          extractionErrors.push(`${file.name}: ${errorMsg}`);
+          // Continue with other files, but log the error
+          continue;
+        }
+
+        if (!extractedText || extractedText.trim().length === 0) {
+          console.warn(`⚠️ No text extracted from ${file.name}, skipping...`);
+          extractionErrors.push(`${file.name}: File appears to be empty or contains no extractable text`);
+          continue;
+        }
+
+        allExtractedText.push(extractedText);
+
+        // Chunk the text
+        const chunks = chunkText(extractedText, 1000, 200);
+
+        // Upload file to Supabase Storage
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}/${Date.now()}-${file.name}`;
+        const fileBuffer = await file.arrayBuffer();
+
+        const { error: uploadError } = await supabase.storage
+          .from('documents')
+          .upload(fileName, fileBuffer, {
+            contentType: file.type,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error('Storage upload error:', uploadError);
+          continue; // Skip this file but continue with others
+        }
+
+        // Get public URL
+        const { data: urlData } = supabase.storage
+          .from('documents')
+          .getPublicUrl(fileName);
+
+        // Skip embedding generation for now to save memory
+        // Embeddings can be generated later if needed for search
+        // This significantly reduces memory usage
+        console.log(`⏭️ Skipping embedding generation for ${chunks.length} chunks to save memory`);
+        
+        // Optional: Save chunks without embeddings (for future use)
+        // We'll skip this to save memory and processing time
+        const documentChunks: any[] = [];
+
+        // Save file directly to document_collections (matching your schema)
+        const { data: documentData, error: documentError } = await supabase
+          .from('document_collections')
+          .insert({
+            collection_id: collectionData.id,
+            user_id: user.id,
+            file_name: file.name,
+            file_type: file.type,
+            file_size: file.size,
+            content: extractedText, // Store extracted text
+            embedding: null, // Will be set if needed for search
+          })
+          .select()
+          .single();
+
+        if (documentError) {
+          console.error(`❌ Document collection insert error for ${file.name}:`, documentError);
+          console.error('Error details:', {
+            code: documentError.code,
+            message: documentError.message,
+            details: documentError.details,
+            hint: documentError.hint,
+          });
+          
+          // Check if table doesn't exist
+          if (documentError.code === 'PGRST116' || documentError.message?.includes('does not exist')) {
+            console.error('⚠️ document_collections table does not exist! Please run the SQL schema from SUPABASE_SCHEMA.md');
+            // Still continue to try generating notes, but warn the user
+          }
+          
+          // Don't continue - we want to know about this error
+          // But we'll still try to generate notes from the extracted text
+          console.warn(`⚠️ File ${file.name} was not saved to database, but text was extracted. Continuing...`);
+        } else {
+          console.log(`✅ Saved file ${file.name} to document_collections (ID: ${documentData.id})`);
+        }
+
+        // Also save to documents table for compatibility (if it exists)
+        try {
+          await supabase
+            .from('documents')
+            .insert({
+              user_id: user.id,
+              file_name: file.name,
+              file_size: file.size,
+              content: extractedText,
+              embedding: null,
+            });
+        } catch (error) {
+          // Documents table might not exist or have different structure - that's okay
+          console.warn('Could not save to documents table:', error);
+        }
+
+        // Only add to uploadedDocuments if document was successfully saved
+        if (documentData) {
+          uploadedDocuments.push({
+            id: documentData.id,
+            name: documentData.file_name,
+            status: 'completed',
+          });
+        } else {
+          // Even if save failed, track that we processed the file
+          uploadedDocuments.push({
+            id: `temp-${Date.now()}-${Math.random()}`,
+            name: file.name,
+            status: 'error',
+          });
+        }
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+        // Continue with other files
+      }
+    }
+
+    // Generate AI notes from all extracted text
+    if (allExtractedText.length === 0) {
+      console.error('❌ No text extracted from any files');
+      console.error(`Processed ${files.length} files, but extractedText array is empty`);
+      console.error('Extraction errors:', extractionErrors);
+      return NextResponse.json(
+        { 
+          error: 'Could not extract text from uploaded files. Please check if files are valid PDF, DOCX, or TXT files.',
+          details: `Tried to process ${files.length} file(s) but no text was extracted.`,
+          errors: extractionErrors.length > 0 ? extractionErrors : ['Unknown error during text extraction']
+        },
+        { status: 400 }
+      );
+    }
+
+    // Limit combined text to prevent memory issues
+    // Use first 50000 characters max (about 10-15 pages of text)
+    const combinedText = allExtractedText.join('\n\n--- Document Separator ---\n\n');
+    const maxTextLength = 50000; // Limit to ~50KB of text
+    const textToProcess = combinedText.length > maxTextLength 
+      ? combinedText.substring(0, maxTextLength) + '\n\n[Content truncated due to size limits...]'
+      : combinedText;
+    
+    console.log(`📝 Generating AI notes from ${textToProcess.length} characters of text (${combinedText.length} total available)...`);
+    console.log(`🎨 Output format: ${outputType}, Word count: ${wordCount}`);
+    
+    const aiNotes = await generateAINotes(textToProcess, outputType, wordCount);
+    
+    if (!aiNotes || aiNotes.trim().length === 0) {
+      console.error('❌ AI notes generation returned empty result');
+      return NextResponse.json(
+        { error: 'Failed to generate notes. Please try again or check your Google Gemini API key.' },
+        { status: 500 }
+      );
+    }
+    
+    console.log(`✅ Generated notes (${aiNotes.length} characters)`);
+
+    // Save notes to database
+    console.log(`💾 Saving notes to database for collection ${collectionData.id}...`);
+    const { data: notesData, error: notesError } = await supabase
+      .from('notes')
+      .insert({
+        collection_id: collectionData.id,
+        user_id: user.id,
+        content: aiNotes,
+      })
+      .select()
+      .single();
+
+    if (notesError) {
+      console.error('❌ Notes insert error:', notesError);
+      console.error('Error details:', {
+        code: notesError.code,
+        message: notesError.message,
+        details: notesError.details,
+        hint: notesError.hint,
+      });
+      
+      if (notesError.code === 'PGRST116' || notesError.message?.includes('does not exist')) {
+        console.error('⚠️ notes table does not exist! Please run the SQL schema from SUPABASE_SCHEMA.md');
+        return NextResponse.json(
+          { 
+            error: 'Notes table does not exist. Please run the SQL schema from SUPABASE_SCHEMA.md',
+            collection: {
+              id: collectionData.id,
+              name: collectionData.name,
+            },
+            notesGenerated: true, // Notes were generated but not saved
+            notesContent: aiNotes.substring(0, 500) + '...', // Return preview
+          },
+          { status: 500 }
+        );
+      }
+      
+      // Don't fail the whole request if notes fail, but log it
+      console.warn('⚠️ Notes were generated but could not be saved to database');
+      console.warn('⚠️ Generated notes preview:', aiNotes.substring(0, 200) + '...');
+      
+      // Still return success, but indicate notes weren't saved
+      return NextResponse.json({
+        success: true,
+        collection: {
+          id: collectionData.id,
+          name: collectionData.name,
+        },
+        documents: uploadedDocuments.map((doc) => ({
+          id: doc.id,
+          name: doc.name,
+          status: doc.status,
+        })),
+        notesId: null,
+        notesSaved: false,
+        notesGenerated: true,
+        error: `Notes were generated but could not be saved: ${notesError.message}`,
+        filesSaved: uploadedDocuments.filter(doc => doc.status === 'completed').length,
+        totalFiles: uploadedDocuments.length,
+      });
+    } else {
+      console.log(`✅ Notes saved successfully! (ID: ${notesData.id})`);
+    }
+
+    console.log(`✅ Upload complete! Collection: ${collectionData.name}, Files: ${uploadedDocuments.length}, Notes: ${notesData ? 'saved' : 'failed to save'}`);
+    
+    return NextResponse.json({
+      success: true,
+      collection: {
+        id: collectionData.id,
+        name: collectionData.name,
+      },
+      documents: uploadedDocuments.map((doc) => ({
+        id: doc.id,
+        name: doc.name,
+        status: doc.status,
+      })),
+      notesId: notesData?.id,
+      notesSaved: !!notesData,
+      filesSaved: uploadedDocuments.filter(doc => doc.status === 'completed').length,
+      totalFiles: uploadedDocuments.length,
+    });
+  } catch (error) {
+    console.error('Upload error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
+

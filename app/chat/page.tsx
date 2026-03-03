@@ -888,7 +888,7 @@ ${userInput}`,
                   });
                 }
               } catch (parseErr) {
-                console.warn('Failed to parse JSON:', data.substring(0, 50), parseErr);
+                console.warn('Failed to parse JSON:', dataStr.substring(0, 50), parseErr);
               }
             }
           }

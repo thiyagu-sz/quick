@@ -84,6 +84,9 @@ export async function POST(request: NextRequest) {
   try {
     // 1. Authentication
     const { user, supabase } = await requireAuth(request);
+    if (!supabase) {
+      throw new AppError('Failed to initialize database client', 500, 'CONFIG_ERROR');
+    }
     ErrorHandler.debug('Auth context', { userId: user.id });
 
     // 2. Global Rate Limiting (Redis-backed)

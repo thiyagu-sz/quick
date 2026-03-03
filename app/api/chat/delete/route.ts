@@ -6,6 +6,10 @@ export async function DELETE(request: NextRequest) {
   try {
     const { user, supabase } = await requireAuth(request);
 
+    if (!supabase) {
+      throw new AppError('Failed to initialize database client', 500, 'CONFIG_ERROR');
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const conversationId = searchParams.get('id');
 

@@ -546,6 +546,9 @@ export async function POST(request: NextRequest) {
   try {
     // 1. Authentication
     const { user, supabase } = await requireAuth(request);
+    if (!supabase) {
+      throw new AppError('Failed to initialize database client', 500, 'CONFIG_ERROR');
+    }
 
     const formData = await request.formData();
     const collectionName = formData.get('collectionName') as string;

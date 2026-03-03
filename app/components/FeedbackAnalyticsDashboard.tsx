@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AlertCircle, Loader2, TrendingUp, Users, MessageSquare, ArrowUp } from 'lucide-react';
+import { AlertCircle, Loader2, TrendingUp, Users, MessageSquare, ArrowUp, Check, Minus, AlertTriangle, Star } from 'lucide-react';
 
 interface FeedbackStats {
   total: number;
@@ -128,8 +128,14 @@ export default function FeedbackAnalyticsDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-400 text-sm mb-1">Status</p>
-                <p className={`text-3xl font-bold ${(stats?.averageRating || 0) >= 4 ? 'text-green-400' : (stats?.averageRating || 0) >= 3 ? 'text-yellow-400' : 'text-red-400'}`}>
-                  {(stats?.averageRating || 0) >= 4 ? '✓ Good' : (stats?.averageRating || 0) >= 3 ? '~ Fair' : '✗ Needs Work'}
+                <p className={`text-3xl font-bold ${(stats?.averageRating || 0) >= 4 ? 'text-green-400' : (stats?.averageRating || 0) >= 3 ? 'text-yellow-400' : 'text-red-400'} flex items-center gap-2`}>
+                  {(stats?.averageRating || 0) >= 4 ? (
+                    <><Check className="w-6 h-6" /> Good</>
+                  ) : (stats?.averageRating || 0) >= 3 ? (
+                    <><Minus className="w-6 h-6" /> Fair</>
+                  ) : (
+                    <><AlertTriangle className="w-6 h-6" /> Needs Work</>
+                  )}
                 </p>
               </div>
               <Users className="w-8 h-8 text-[#667eea] opacity-50" />
@@ -183,8 +189,15 @@ export default function FeedbackAnalyticsDashboard() {
                       <h3 className="font-semibold text-white">{feedback.title}</h3>
                       <p className="text-xs text-gray-400 mt-1 capitalize">{feedback.category}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{'⭐'.repeat(feedback.rating)}</span>
+                    <div className="flex items-center gap-1 text-yellow-500">
+                      {[...Array(5)].map((_, i) => (
+                        <Star
+                          key={i}
+                          className={`w-4 h-4 ${
+                            i < feedback.rating ? 'fill-current' : 'text-gray-600 fill-none'
+                          }`}
+                        />
+                      ))}
                       <span className="text-xs text-gray-400 ml-2">{feedback.rating}/5</span>
                     </div>
                   </div>

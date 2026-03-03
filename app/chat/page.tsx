@@ -68,74 +68,18 @@ function ChatContent() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const hasMountedRef = useRef(false);
 
-  // Handle Mobile Keyboard and Visual Viewport
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.visualViewport) return;
-
-    const handleViewportChange = () => {
-      const viewport = window.visualViewport;
-      if (!viewport) return;
-
-      const vHeight = viewport.height;
-      const windowHeight = window.innerHeight;
-      
-      // Detect if keyboard is likely open (viewport height significantly less than window height)
-      const keyboardActive = windowHeight - vHeight > 150;
-      setIsKeyboardOpen(keyboardActive);
-      setViewportHeight(`${vHeight}px`);
-
-      // If keyboard is opening, scroll to bottom
-      if (keyboardActive) {
-        setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
-      }
-    };
-
-    window.visualViewport.addEventListener('resize', handleViewportChange);
-    window.visualViewport.addEventListener('scroll', handleViewportChange);
-    
-    // Initial check
-    handleViewportChange();
-    
-    return () => {
-      window.visualViewport?.removeEventListener('resize', handleViewportChange);
-      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
-    };
-  }, []);
-
-
-
   // Remove raw markdown bold markers that break UI (e.g. **bold**)
   const sanitizeContent = (text: string | undefined | null) => {
     if (!text) return '';
     return text;
   };
 
-  // 1. Handle Auth
-  useEffect(() => {
-    const checkAuth = async () => {
-      const supabase = getSupabaseClient();
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      
-      if (!currentUser) {
-        router.push('/login');
-        return;
-      }
-
-      setUser(currentUser);
-      setLoading(false);
-    };
-
-    checkAuth();
-  }, [router]);
-
   // Helper to get user-specific localStorage key
   const getStorageKey = useCallback((userId: string | undefined) => {
     return userId ? `ai_chat_draft_${userId}` : 'ai_chat_draft';
   }, []);
 
-  // Load chat history list
+  // Load chat history list - MOVED UP to avoid ReferenceError
   const loadChatHistory = useCallback(async () => {
     try {
       const supabase = getSupabaseClient();
@@ -156,8 +100,70 @@ function ChatContent() {
     }
   }, []);
 
+  // Handle Mobile Keyboard and Visual Viewport
+
+  // 1. Handle Auth and State Cleanup
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Clear all state immediately on ANY user change event to prevent leakage
+      if (event === 'SIGNED_OUT' || event === 'USER_UPDATED' || event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+        console.log('Auth event:', event, '- Clearing state');
+        setMessages([]);
+        setCurrentConversationId(null);
+        setChatHistory([]);
+        setUser(null);
+        setLoading(true); // Reset loading to force a fresh session check
+        
+        // Also clear any UI-specific state
+        setInput('');
+        setShowFormatOptions(false);
+        setQuickTestContent('');
+        setCurrentQuiz(null);
+      }
+
+      if (event === 'SIGNED_OUT') {
+        // Use hard redirect on signout to prevent stuck loading state and clear all memory/auth state
+        console.log('User signed out, redirecting to login');
+        window.location.href = '/login';
+      } else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        if (session?.user) {
+          setUser(session.user);
+          setLoading(false);
+          loadChatHistory();
+        } else {
+          setLoading(false);
+        }
+      }
+    });
+
+    const checkAuth = async () => {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      
+      if (!currentUser) {
+        router.push('/login');
+        return;
+      }
+
+      setUser(currentUser);
+      setLoading(false);
+      loadChatHistory();
+    };
+
+    checkAuth();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [router, loadChatHistory]);
+
   // Load conversation from API
   const loadConversation = useCallback(async (conversationId: string) => {
+    // Clear previous messages immediately when starting a new load
+    setMessages([]);
+    setIsLoading(true);
+
     try {
       const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
@@ -178,11 +184,18 @@ function ChatContent() {
           timestamp: new Date(msg.created_at),
         }));
         setMessages(loadedMessages);
+      } else {
+        // If not found or unauthorized, reset state
+        setCurrentConversationId(null);
+        router.push('/chat');
       }
     } catch (error) {
       console.error('Error loading conversation:', error);
+      setMessages([]);
+    } finally {
+      setIsLoading(false);
     }
-  }, []);
+  }, [router]);
 
   // 2. Handle Conversation Loading (Reactive to URL)
   const conversationIdFromUrl = searchParams.get('id');
@@ -245,12 +258,12 @@ function ChatContent() {
     }
   }, [messages, currentConversationId, saveChat, selectedFormat, wordCount, user?.id, getStorageKey]);
 
-  // Scroll to bottom on new messages
+  // Scroll to bottom on new messages or loading state
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 || isLoading) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   // Ensure scrolling works properly when quiz interface is shown/hidden
   useEffect(() => {
@@ -313,10 +326,6 @@ function ChatContent() {
   }, [loading, currentConversationId, user?.id, getStorageKey]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
@@ -339,9 +348,40 @@ function ChatContent() {
       }, 500);
     };
 
+    const handleChatDeleted = (e: any) => {
+      const deletedId = e.detail?.chatId;
+      console.log('Chat deleted event received:', deletedId);
+      
+      if (deletedId) {
+        setChatHistory(prev => prev.filter(c => c.id !== deletedId));
+        if (currentConversationId === deletedId) {
+          setCurrentConversationId(null);
+          setMessages([]);
+          // Use replace instead of push to avoid history stack buildup for deleted items
+          router.replace('/chat');
+          showToastMessage('Conversation deleted');
+        }
+      } else {
+        loadChatHistory();
+      }
+    };
+
+    const handleAuthChangeClear = () => {
+      setMessages([]);
+      setChatHistory([]);
+      setCurrentConversationId(null);
+    };
+
     window.addEventListener('chatSaved', handleChatSaved);
-    return () => window.removeEventListener('chatSaved', handleChatSaved);
-  }, [loadChatHistory]);
+    window.addEventListener('chatDeleted' as any, handleChatDeleted);
+    window.addEventListener('authChangeClear', handleAuthChangeClear);
+    
+    return () => {
+      window.removeEventListener('chatSaved', handleChatSaved);
+      window.removeEventListener('chatDeleted' as any, handleChatDeleted);
+      window.removeEventListener('authChangeClear', handleAuthChangeClear);
+    };
+  }, [loadChatHistory, currentConversationId, router]);
 
   const handleInputFocus = () => {
     setShowFormatOptions(true);
@@ -403,7 +443,7 @@ function ChatContent() {
     const aboutMessage: Message = {
       id: Date.now().toString(),
       role: 'assistant',
-      content: `#  Welcome to QuickNotes!
+      content: `# Welcome to QuickNotes!
 
 ## What is QuickNotes?
 QuickNotes is your personal study assistant that transforms any content into organized, formatted study notes in seconds.
@@ -434,11 +474,11 @@ QuickNotes is your personal study assistant that transforms any content into org
 - Or copy the generated text directly
 
 ## Tips:
- Paste full paragraphs or entire documents
- Longer content produces better formatted notes
- Experiment with different formats
-Adjust word count based on your needs
-All your notes are automatically saved
+- Paste full paragraphs or entire documents
+- Longer content produces better formatted notes
+- Experiment with different formats
+- Adjust word count based on your needs
+- All your notes are automatically saved
 
 ---
 
@@ -656,10 +696,18 @@ ${userInput}`,
       processedInput = generateFormatPrompt(selectedFormat, countToUse, userInput);
     }
 
+    let displayContent = userInput;
+    if (showFormatOptions && selectedFormat) {
+      const formatLabel = formatOptions.find(f => f.value === selectedFormat)?.label || selectedFormat;
+      const countToUse = selectedFormat === 'mcqs' ? questionCount : wordCount;
+      const unit = selectedFormat === 'mcqs' ? 'Questions' : 'Words';
+      displayContent = `Generating ${formatLabel} (${countToUse} ${unit}) from the provided content...`;
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: userInput, // Store original input
+      content: displayContent, // Use friendly content if format is selected
       timestamp: new Date(),
     };
 
@@ -687,7 +735,10 @@ ${userInput}`,
       if (saveChat && currentUser) {
         try {
           console.log('💾 Saving user message...');
-          savedConversationId = await saveMessageToDatabase(userMessage, currentUser.id);
+          savedConversationId = await saveMessageToDatabase({
+            ...userMessage,
+            content: userInput // Save ACTUAL input in DB for LLM reference, but UI shows friendly message
+          }, currentUser.id);
           console.log('✅ User message saved, conversationId:', savedConversationId);
         } catch (saveError) {
           console.error('Error saving user message:', saveError);
@@ -706,7 +757,9 @@ ${userInput}`,
           ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
         },
         body: JSON.stringify({
-          question: processedInput,
+          question: userInput, // Raw question for saving
+          prompt: processedInput, // Formatted prompt for LLM
+          conversationId: currentConversationId || savedConversationId, // Pass conversationId if we have it
           userId: currentUser.id,
         }),
       });
@@ -719,7 +772,7 @@ ${userInput}`,
         let errorMessage = `API error (${response.status})`;
         try {
           const errorJson = JSON.parse(errorData);
-          errorMessage = errorJson.error || errorMessage;
+          errorMessage = errorJson.error?.message || errorJson.error || errorMessage;
         } catch {
           errorMessage = errorData.substring(0, 200) || errorMessage;
         }
@@ -732,6 +785,7 @@ ${userInput}`,
       const messageId = (Date.now() + 1).toString();
       let assistantContent = '';
 
+      // Add assistant message ONLY once we have a response and start streaming
       setMessages((prev) => [...prev, {
         id: messageId,
         role: 'assistant',
@@ -785,12 +839,12 @@ ${userInput}`,
           const lines = chunk.split('\n');
 
           for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') continue;
+            if (line.trim().startsWith('data: ')) {
+              const dataStr = line.trim().slice(6);
+              if (dataStr === '[DONE]') continue;
 
               try {
-                const parsed = JSON.parse(data);
+                const parsed = JSON.parse(dataStr);
                 if (parsed.error) {
                   console.error('❌ API Error in stream:', parsed.error);
                   assistantContent = `Error: ${parsed.error}`;
@@ -1694,17 +1748,17 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
                 <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
                   <MessageSquare className="w-6 h-6 sm:w-8 sm:h-8 text-blue-600" />
                 </div>
-                <h2 className="text-lg sm:text-xl font-semibold text-gray-900 mb-2 sm:mb-3">Welcome to QuickNotes! 📚</h2>
+                <h2 className="text-lg sm:text-xl font-semibold text-gray-900 mb-2 sm:mb-3">Welcome to QuickNotes</h2>
                 <p className="text-gray-600 text-xs sm:text-sm max-w-sm mx-auto mb-3 sm:mb-4">
                   Paste your study content into the text field below, then select your desired output format.
                 </p>
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 max-w-sm mx-auto text-left">
-                  <p className="text-xs font-semibold text-blue-900 mb-2 text-left">✨ How to use:</p>
+                  <p className="text-xs font-semibold text-blue-900 mb-2 text-left">How to use:</p>
                   <ul className="text-xs text-blue-800 space-y-1 text-left">
-                    <li className="text-left">📋 Paste your content in the chat below</li>
-                    <li className="text-left">🎯 Select format: Key Points, Summary, Exam Notes, etc.</li>
-                    <li className="text-left">📊 Set word count for your output</li>
-                    <li className="text-left">💾 Export as PDF or download</li>
+                    <li className="text-left">Paste your content in the chat below</li>
+                    <li className="text-left">Select format: Key Points, Summary, Exam Notes, etc.</li>
+                    <li className="text-left">Set word count for your output</li>
+                    <li className="text-left">Export as PDF or download</li>
                   </ul>
                 </div>
               </div>
@@ -1861,8 +1915,8 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 text-gray-600">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span className="text-sm">AI is thinking…</span>
+                            <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                            <span className="text-sm font-medium">AI is thinking... wait a minute...</span>
                           </div>
                         </div>
                       </div>

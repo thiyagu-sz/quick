@@ -85,13 +85,18 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Feedback table (optional)
+-- Feedback table
 CREATE TABLE IF NOT EXISTS feedback (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-  email TEXT,
-  feedback_type TEXT NOT NULL,
+  email TEXT NOT NULL,
+  rating INTEGER CHECK (rating >= 1 AND rating <= 5),
+  category TEXT NOT NULL DEFAULT 'general',
+  title TEXT,
   message TEXT NOT NULL,
+  features TEXT[] DEFAULT '{}',
+  improvements TEXT,
+  would_recommend BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

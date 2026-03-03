@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { MessageSquare, Send, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import { MessageSquare, Send, AlertCircle, CheckCircle, Loader2, Bug, Lightbulb, Zap, Smile, Settings, Book, HelpCircle } from 'lucide-react';
 
 interface FeedbackData {
   rating: number;
@@ -22,13 +22,13 @@ interface FeedbackFormProps {
 }
 
 const FEEDBACK_CATEGORIES = [
-  { value: 'bug', label: '🐛 Bug Report' },
-  { value: 'feature', label: '💡 Feature Request' },
-  { value: 'improvement', label: '⚡ Improvement Suggestion' },
-  { value: 'experience', label: '😊 User Experience' },
-  { value: 'performance', label: '⚙️ Performance' },
-  { value: 'documentation', label: '📚 Documentation' },
-  { value: 'other', label: '🤔 Other' },
+  { value: 'bug', label: 'Bug Report' },
+  { value: 'feature', label: 'Feature Request' },
+  { value: 'improvement', label: 'Improvement Suggestion' },
+  { value: 'experience', label: 'User Experience' },
+  { value: 'performance', label: 'Performance' },
+  { value: 'documentation', label: 'Documentation' },
+  { value: 'other', label: 'Other' },
 ];
 
 const FEATURE_OPTIONS = [
@@ -136,7 +136,8 @@ export default function FeedbackForm({ userId, userEmail, onClose, onSubmitSucce
       });
 
       if (!response.ok) {
-        throw new Error('Failed to submit feedback');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || errorData.error || 'Failed to submit feedback');
       }
 
       setSubmitStatus({
@@ -161,10 +162,10 @@ export default function FeedbackForm({ userId, userEmail, onClose, onSubmitSucce
       setTimeout(() => {
         onSubmitSuccess?.();
       }, 1500);
-    } catch (error) {
+    } catch (error: any) {
       setSubmitStatus({
         type: 'error',
-        message: 'Failed to submit feedback. Please try again later.',
+        message: error.message || 'Failed to submit feedback. Please try again later.',
       });
       console.error('Feedback submission error:', error);
     } finally {

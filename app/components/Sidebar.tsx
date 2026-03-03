@@ -66,7 +66,13 @@ export default function Sidebar({ user }: SidebarProps) {
     if (!chatToDelete) return;
     
     const chatId = chatToDelete;
+    const previousHistory = [...chatHistory];
+    
+    // Optimistic Update: Remove from local state immediately
+    setChatHistory(prev => prev.filter(c => c.id !== chatId));
     setDeletingId(chatId);
+    setShowDeleteConfirm(false);
+
     try {
       const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
@@ -78,29 +84,27 @@ export default function Sidebar({ user }: SidebarProps) {
         },
       });
 
-      if (response.ok) {
-        // Remove from local state
-        setChatHistory(prev => prev.filter(c => c.id !== chatId));
-        // If we're viewing this chat, redirect to /chat
-        if (pathname === `/chat` && window.location.search.includes(chatId)) {
-          router.push('/chat');
-        }
-        setStatusModal({
-          show: true,
-          type: 'success',
-          title: 'Deleted',
-          message: 'Conversation deleted successfully.',
-        });
-      } else {
+      if (!response.ok) {
+        // Restore previous state if API fails
+        setChatHistory(previousHistory);
         setStatusModal({
           show: true,
           type: 'error',
           title: 'Delete Failed',
           message: 'Failed to delete conversation. Please try again.',
         });
+      } else {
+        // Dispatch global event for sync
+        window.dispatchEvent(new CustomEvent('chatDeleted', { detail: { chatId } }));
+        
+        // If we're viewing this chat, redirect to /chat
+        if (pathname === `/chat` && window.location.search.includes(chatId)) {
+          router.push('/chat');
+        }
       }
     } catch (error) {
       console.error('Error deleting chat:', error);
+      setChatHistory(previousHistory);
       setStatusModal({
         show: true,
         type: 'error',
@@ -110,7 +114,6 @@ export default function Sidebar({ user }: SidebarProps) {
     } finally {
       setDeletingId(null);
       setChatToDelete(null);
-      setShowDeleteConfirm(false);
     }
   };
 
@@ -144,69 +147,59 @@ export default function Sidebar({ user }: SidebarProps) {
   };
 
   useEffect(() => {
+    const supabase = getSupabaseClient();
+    
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Clear history immediately on auth change to prevent cross-user leakage
+      if (event === 'SIGNED_OUT' || event === 'USER_UPDATED' || event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+        setChatHistory([]);
+        setUserEmail('');
+        
+        // Force a UI refresh for chat list if on the chat page
+        if (pathname === '/chat') {
+          window.dispatchEvent(new CustomEvent('authChangeClear'));
+        }
+      }
+
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        if (session?.user) {
+          setUserEmail(session.user.email || '');
+          loadChatHistory(session.user.id);
+        }
+      }
+    });
+
     const fetchUser = async () => {
-      const supabase = getSupabaseClient();
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
         setUserEmail(currentUser.email || '');
-        // Load chat history immediately
-        await loadChatHistory(currentUser.id);
+        loadChatHistory(currentUser.id);
       }
     };
     fetchUser();
-    
-    // Also set up periodic refresh when on chat page
-    if (pathname === '/chat') {
-      const intervalId = setInterval(async () => {
-        const supabase = getSupabaseClient();
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (currentUser) {
-          await loadChatHistory(currentUser.id);
-        }
-      }, 3000); // Refresh every 3 seconds when on chat page
-      
-      return () => clearInterval(intervalId);
-    }
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [pathname]);
 
-  // Refresh chat history when on chat page
+  // Sync with global chat events
   useEffect(() => {
-    if (pathname === '/chat') {
-      const fetchAndLoad = async () => {
-        const supabase = getSupabaseClient();
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (currentUser) {
-          console.log('Loading chat history on chat page for user:', currentUser.id);
-          await loadChatHistory(currentUser.id);
-        }
-      };
-      fetchAndLoad();
-      
-      // Also set up a small delay refresh to catch any saves that happened
-      const timeoutId = setTimeout(() => {
-        fetchAndLoad();
-      }, 1000);
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [pathname]);
-
-  // Listen for chat save events
-  useEffect(() => {
-    const handleChatSaved = async () => {
-      console.log('Chat saved event received, reloading history...');
-      // Small delay to ensure database write is complete
-      setTimeout(async () => {
-        const supabase = getSupabaseClient();
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        if (currentUser) {
-          await loadChatHistory(currentUser.id);
-        }
-      }, 500);
+    const handleSync = async () => {
+      const supabase = getSupabaseClient();
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        await loadChatHistory(currentUser.id);
+      }
     };
 
-    window.addEventListener('chatSaved', handleChatSaved);
-    return () => window.removeEventListener('chatSaved', handleChatSaved);
+    window.addEventListener('chatSaved', handleSync);
+    window.addEventListener('chatDeleted' as any, handleSync);
+    
+    return () => {
+      window.removeEventListener('chatSaved', handleSync);
+      window.removeEventListener('chatDeleted' as any, handleSync);
+    };
   }, []);
 
   // Close mobile menu when route changes
@@ -215,28 +208,37 @@ export default function Sidebar({ user }: SidebarProps) {
   }, [pathname]);
 
   const handleSignOut = async () => {
-    const supabase = getSupabaseClient();
-    // Get current user ID before signing out to clear their localStorage
-    const { data: { user: currentUser } } = await supabase.auth.getUser();
-    
-    await supabase.auth.signOut();
-    // Clear the singleton instance to ensure clean state for next user
-    clearSupabaseClient();
-    // Clear chat history state
-    setChatHistory([]);
-    
-    // Clear user-specific localStorage data
-    if (currentUser?.id) {
-      try {
-        localStorage.removeItem(`ai_chat_draft_${currentUser.id}`);
-      } catch (e) { /* ignore */ }
-    }
-    // Also clear any old global key that might exist
     try {
-      localStorage.removeItem('ai_chat_draft');
-    } catch (e) { /* ignore */ }
-    
-    router.push('/login');
+      const supabase = getSupabaseClient();
+      
+      // Get current user ID before signing out to clear their localStorage
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      
+      // 1. Clear session first
+      await supabase.auth.signOut();
+      
+      // 2. Clear singleton instance
+      clearSupabaseClient();
+      
+      // 3. Clear local state
+      setChatHistory([]);
+      setUserEmail('');
+      
+      // 4. Clear user-specific localStorage data
+      if (currentUser?.id) {
+        try {
+          localStorage.removeItem(`ai_chat_draft_${currentUser.id}`);
+        } catch (e) { /* ignore */ }
+      }
+      
+      // 5. Use hard redirect to ensure zero state leakage and fix "stuck loading" bug
+      // Using window.location.href instead of router.push ensures a fresh browser state
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Error during sign out:', error);
+      // Fallback redirect if something fails
+      window.location.href = '/login';
+    }
   };
 
   const navItems = [

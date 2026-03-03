@@ -188,6 +188,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       requireAuth(request),
       requestTimeout,
     ]);
+    if (!supabase) {
+      throw new AppError('Failed to initialize database client', 500, 'CONFIG_ERROR');
+    }
 
     // 6. Generate idempotency key
     const idempotencyKey = generateIdempotencyHash(user.id, searchParams);

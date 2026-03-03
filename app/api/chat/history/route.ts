@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
 import { createHash } from 'crypto';
+import { requireAuth } from '@/app/lib/auth/requireAuth';
+import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
 
 // Production Configuration
 const CONFIG = {
@@ -16,9 +16,6 @@ const CONFIG = {
     DATABASE_TIMEOUT: 10000, // 10 seconds
     REQUEST_TIMEOUT: 15000,  // 15 seconds
   },
-  CACHE: {
-    TTL: 30000, // 30 seconds
-  },
   LIMITS: {
     MIN_LIMIT: 1,
     MAX_LIMIT: 50,
@@ -29,7 +26,6 @@ const CONFIG = {
 // Global concurrent request tracking (stateless via Map)
 const concurrentRequests = new Map<string, number>();
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const requestCache = new Map<string, { data: any; timestamp: number; etag: string }>();
 
 // Utility functions
 function getClientIP(request: NextRequest): string {
@@ -95,123 +91,6 @@ async function acquireConcurrencySlot(clientIP: string): Promise<() => void> {
   };
 }
 
-// Cache management
-function getCachedResponse(cacheKey: string, ifNoneMatch?: string | null): { data: any; etag: string } | null {
-  const cached = requestCache.get(cacheKey);
-  if (!cached || Date.now() - cached.timestamp > CONFIG.CACHE.TTL) {
-    requestCache.delete(cacheKey);
-    return null;
-  }
-
-  // Check ETag for conditional requests
-  if (ifNoneMatch && ifNoneMatch === cached.etag) {
-    return { data: null, etag: cached.etag };
-  }
-
-  return cached;
-}
-
-function setCachedResponse(cacheKey: string, data: any, etag: string): void {
-  requestCache.set(cacheKey, {
-    data,
-    timestamp: Date.now(),
-    etag,
-  });
-
-  // Cleanup old cache entries (simple LRU-like behavior)
-  if (requestCache.size > 1000) {
-    const oldestKey = requestCache.keys().next().value;
-    if (oldestKey) {
-      requestCache.delete(oldestKey);
-    }
-  }
-}
-
-// Authentication with timeout
-async function authenticateRequest(request: NextRequest): Promise<{ user: any; supabase: any }> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error('Missing Supabase configuration');
-  }
-
-  // Create timeout promise for auth operations
-  const authTimeout = createTimeoutPromise(CONFIG.TIMEOUTS.DATABASE_TIMEOUT);
-
-  // Cookie-based authentication
-  const cookieStore = await cookies();
-  const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      get(name: string) {
-        return cookieStore.get(name)?.value;
-      },
-    },
-  } as any);
-
-  let user = null;
-  let authError = null;
-
-  try {
-    // Race authentication against timeout
-    const cookieAuthResult = await Promise.race([
-      authClient.auth.getUser(),
-      authTimeout,
-    ]);
-    user = cookieAuthResult.data.user;
-    authError = cookieAuthResult.error;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('timeout')) {
-      throw new Error('Authentication timeout');
-    }
-    throw error;
-  }
-
-  // Fallback to Bearer token if cookie auth fails
-  if ((authError || !user) && request.headers.get('Authorization')?.startsWith('Bearer ')) {
-    const authHeader = request.headers.get('Authorization');
-    const token = authHeader!.substring(7);
-    
-    const tokenClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      },
-    });
-    
-    try {
-      const tokenAuthResult = await Promise.race([
-        tokenClient.auth.getUser(),
-        createTimeoutPromise(CONFIG.TIMEOUTS.DATABASE_TIMEOUT),
-      ]);
-      
-      if (tokenAuthResult.data.user && !tokenAuthResult.error) {
-        user = tokenAuthResult.data.user;
-        authError = null;
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('timeout')) {
-        throw new Error('Token authentication timeout');
-      }
-    }
-  }
-
-  if (authError || !user) {
-    throw new Error('Unauthorized');
-  }
-
-  // Create service client with timeout
-  const supabase = supabaseServiceKey 
-    ? createClient(supabaseUrl, supabaseServiceKey, {
-        auth: { persistSession: false },
-      })
-    : authClient;
-
-  return { user, supabase };
-}
-
 // Database query with transaction support
 async function fetchChatHistory(
   supabase: any, 
@@ -222,7 +101,6 @@ async function fetchChatHistory(
   const dbTimeout = createTimeoutPromise(CONFIG.TIMEOUTS.DATABASE_TIMEOUT);
   
   try {
-    // Use transaction for consistency
     const { data: conversations, error } = await Promise.race([
       supabase
         .from('chat_conversations')
@@ -235,12 +113,10 @@ async function fetchChatHistory(
     ]);
 
     if (error) {
-      // Handle specific error cases
       if (error.code === '42P01' || error.message?.includes('does not exist')) {
         return [];
       }
       
-      // Log error with context but don't expose details
       console.error(`Database error for user ${userId}:`, {
         error: error.message,
         code: error.code,
@@ -309,49 +185,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     // 5. Authentication
     const { user, supabase } = await Promise.race([
-      authenticateRequest(request),
+      requireAuth(request),
       requestTimeout,
     ]);
 
     // 6. Generate idempotency key
     const idempotencyKey = generateIdempotencyHash(user.id, searchParams);
-    const cacheKey = `chat_history_${user.id}_${limit}`;
     
-    // 7. Check cache and conditional requests
-    const ifNoneMatch = request.headers.get('if-none-match');
-    const cached = getCachedResponse(cacheKey, ifNoneMatch);
-    
-    if (cached) {
-      if (cached.data === null) {
-        // ETag matched, return 304
-        return new NextResponse(null, {
-          status: 304,
-          headers: {
-            'ETag': cached.etag,
-            'X-Request-ID': requestId,
-            'X-Cache': 'hit-conditional',
-          },
-        });
-      }
-      
-      // Return cached data
-      return NextResponse.json(cached.data, {
-        headers: {
-          'ETag': cached.etag,
-          'X-Request-ID': requestId,
-          'X-Cache': 'hit',
-          'Cache-Control': 'private, max-age=30',
-        },
-      });
-    }
-
-    // 8. Fetch data with transaction support
+    // 7. Fetch data with transaction support
     const conversations = await Promise.race([
       fetchChatHistory(supabase, user.id, limit, idempotencyKey),
       requestTimeout,
     ]);
 
-    // 9. Generate response
+    // 8. Generate response
     const responseData = { 
       conversations,
       meta: {
@@ -364,75 +211,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     
     const etag = createHash('md5').update(JSON.stringify(responseData)).digest('hex');
     
-    // 10. Cache the response
-    setCachedResponse(cacheKey, responseData, etag);
-    
-    // 11. Return response with comprehensive headers
+    // 9. Return response with comprehensive headers
     return NextResponse.json(responseData, {
       headers: {
         'ETag': etag,
         'X-Request-ID': requestId,
         'X-Cache': 'miss',
         'X-Response-Time': `${Date.now() - startTime}ms`,
-        'Cache-Control': 'private, max-age=30',
+        'Cache-Control': 'no-store, private',
         'X-RateLimit-Limit': CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE.toString(),
         'X-RateLimit-Remaining': (CONFIG.RATE_LIMIT.MAX_REQUESTS_PER_MINUTE - (rateLimitMap.get(`rate_limit_${clientIP}`)?.count || 0)).toString(),
       },
     });
 
   } catch (error) {
-    // Comprehensive error isolation and logging
-    const errorDetails = {
-      requestId,
-      clientIP,
-      timestamp: new Date().toISOString(),
-      responseTime: Date.now() - startTime,
-      error: error instanceof Error ? {
-        name: error.name,
-        message: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-      } : 'Unknown error',
-    };
-
-    console.error('Chat history API error:', errorDetails);
-
-    // Determine error response based on error type
-    let statusCode = 500;
-    let errorMessage = 'Internal server error';
-
-    if (error instanceof Error) {
-      if (error.message.includes('timeout')) {
-        statusCode = 504;
-        errorMessage = 'Request timeout';
-      } else if (error.message.includes('Unauthorized')) {
-        statusCode = 401;
-        errorMessage = 'Unauthorized';
-      } else if (error.message.includes('Too many concurrent requests')) {
-        statusCode = 429;
-        errorMessage = 'Too many concurrent requests';
-      } else if (error.message.includes('Rate limit')) {
-        statusCode = 429;
-        errorMessage = 'Rate limit exceeded';
-      } else if (error.message.includes('Missing Supabase configuration')) {
-        statusCode = 503;
-        errorMessage = 'Service temporarily unavailable';
-      }
-    }
-
-    return NextResponse.json(
-      { 
-        error: errorMessage,
-        requestId,
-        timestamp: new Date().toISOString(),
-      },
-      { 
-        status: statusCode,
-        headers: {
-          'X-Request-ID': requestId,
-          'X-Response-Time': `${Date.now() - startTime}ms`,
-        },
-      }
-    );
+    return ErrorHandler.handle(error, 'GET /api/chat/history');
   } finally {
     // Always release concurrency slot
     if (releaseConcurrency) {

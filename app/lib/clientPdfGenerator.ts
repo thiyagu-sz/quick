@@ -130,7 +130,7 @@ export class ClientPDFGenerator {
     this.doc.setFontSize(20);
     this.doc.setFont('helvetica', 'bold');
     this.doc.setTextColor(...this.brandColor);
-    this.doc.text('📚 QuickNotes', this.pageWidth / 2, this.currentY, { align: 'center' });
+    this.doc.text('QuickNotes', this.pageWidth / 2, this.currentY, { align: 'center' });
     this.currentY += 8;
 
     // Tagline

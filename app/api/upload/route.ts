@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
 import mammoth from 'mammoth';
+import { AiService } from '@/app/lib/ai/aiService';
+import { CONFIG } from '@/app/lib/config';
+import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
+import { requireAuth } from '@/app/lib/auth/requireAuth';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const ALLOWED_TYPES = [
@@ -52,7 +54,7 @@ async function extractTextFromFile(file: File): Promise<string> {
           const pdfjsModule = await import('pdfjs-dist');
           pdfjs = (pdfjsModule as any).default || pdfjsModule;
           if (pdfjs && pdfjs.getDocument) {
-            console.log('✅ Loaded pdfjs-dist via main import');
+            console.log('Loaded pdfjs-dist via main import');
           }
         } catch (importError) {
           console.log('Main import failed, trying legacy build...');
@@ -64,7 +66,7 @@ async function extractTextFromFile(file: File): Promise<string> {
             const legacyModule = await import('pdfjs-dist/legacy/build/pdf.mjs');
             pdfjs = (legacyModule as any).default || legacyModule;
             if (pdfjs && pdfjs.getDocument) {
-              console.log('✅ Loaded pdfjs-dist via legacy .mjs');
+              console.log('Loaded pdfjs-dist via legacy .mjs');
             }
           } catch (mjsError) {
             console.log('Legacy .mjs import failed, trying .js...');
@@ -87,7 +89,7 @@ async function extractTextFromFile(file: File): Promise<string> {
               try {
                 pdfjs = require(path);
                 if (pdfjs && pdfjs.getDocument) {
-                  console.log(`✅ Loaded pdfjs-dist via require: ${path}`);
+                  console.log(`Loaded pdfjs-dist via require: ${path}`);
                   break;
                 }
               } catch (reqError) {
@@ -114,7 +116,7 @@ async function extractTextFromFile(file: File): Promise<string> {
         const pdfDocument = await loadingTask.promise;
         const numPages = pdfDocument.numPages;
         
-        console.log(`📄 PDF loaded: ${numPages} pages`);
+        console.log(`PDF loaded: ${numPages} pages`);
         
         // Extract text from all pages
         let fullText = '';
@@ -135,7 +137,7 @@ async function extractTextFromFile(file: File): Promise<string> {
           throw new Error('PDF appears to be empty or contains no extractable text');
         }
         
-        console.log(`✅ Extracted ${fullText.length} characters from PDF`);
+        console.log(`Extracted ${fullText.length} characters from PDF`);
         return fullText.trim();
       } catch (parseError) {
         console.error('Error parsing PDF with pdfjs-dist:', parseError);
@@ -183,7 +185,7 @@ async function extractTextFromFile(file: File): Promise<string> {
                 if (!fullText || fullText.trim().length === 0) {
                   reject(new Error('PDF appears to be empty or contains no extractable text'));
                 } else {
-                  console.log(`✅ Extracted ${fullText.length} characters using pdf2json`);
+                  console.log(`Extracted ${fullText.length} characters using pdf2json`);
                   resolve(fullText.trim());
                 }
               } catch (extractError) {
@@ -319,7 +321,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'text-embedding-3-small',
+      model: 'text-embedding-3-small', // Embedding models are usually fixed/tied to DB schema
       input: text,
     }),
   });
@@ -333,117 +335,6 @@ async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 type FormatType = 'key-points' | 'main-concepts' | 'exam-points' | 'short-notes' | 'speech-notes' | 'presentation-notes' | 'summary' | 'mcqs' | 'quick-test';
-
-// Rate limiting and retry logic
-const MAX_RETRIES = 5;
-const INITIAL_RETRY_DELAY = 2000; // 2 seconds
-const MAX_RETRY_DELAY = 30000; // 30 seconds
-
-async function sleepMs(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function callGeminiAPI(
-  messages: any[],
-  options: any = {}
-) {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY?.trim();
-  
-  if (!apiKey) {
-    throw new Error('Google Gemini API key not found');
-  }
-
-  let lastError: any = null;
-  let retryDelay = INITIAL_RETRY_DELAY;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      // Convert OpenRouter message format to Gemini format
-      const contents = messages.map((msg: any) => ({
-        role: msg.role === 'system' ? 'user' : msg.role,
-        parts: [{ text: msg.content }]
-      }));
-
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            temperature: options.temperature || 0.3,
-            maxOutputTokens: options.maxTokens || 2000,
-            topK: 40,
-            topP: 0.95,
-          },
-        }),
-      });
-
-      // Check for rate limiting
-      if (response.status === 429) {
-        lastError = new Error('Rate limit exceeded');
-        
-        // Extract retry-after header if available
-        const retryAfter = response.headers.get('retry-after');
-        // Parse retry-after: could be seconds (number) or HTTP-date
-        let delayMs = retryDelay;
-        if (retryAfter) {
-          const retryAfterNum = parseInt(retryAfter);
-          if (!isNaN(retryAfterNum)) {
-            // If it's a small number, assume it's seconds; otherwise milliseconds
-            delayMs = retryAfterNum > 100 ? retryAfterNum : retryAfterNum * 1000;
-          }
-        }
-        // Add jitter to avoid thundering herd
-        const jitter = Math.random() * 1000;
-        delayMs = Math.min(delayMs + jitter, MAX_RETRY_DELAY);
-        
-        if (attempt < MAX_RETRIES) {
-          console.warn(`⚠️ Rate limit hit (429). Attempt ${attempt}/${MAX_RETRIES}. Waiting ${Math.round(delayMs)}ms before retry...`);
-          await sleepMs(delayMs);
-          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY); // Exponential backoff
-          continue;
-        }
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Google Gemini API error (attempt ${attempt}/${MAX_RETRIES}):`, response.status, errorText);
-        
-        lastError = new Error(`API error ${response.status}: ${errorText.substring(0, 200)}`);
-        
-        // Don't retry on auth errors
-        if (response.status === 401) {
-          throw lastError;
-        }
-        
-        // Retry on 5xx errors
-        if (response.status >= 500 && attempt < MAX_RETRIES) {
-          console.warn(`⚠️ Server error ${response.status}. Attempt ${attempt}/${MAX_RETRIES}. Retrying...`);
-          await sleepMs(retryDelay);
-          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
-          continue;
-        }
-        
-        throw lastError;
-      }
-
-      return response;
-    } catch (error) {
-      lastError = error;
-      
-      if (attempt < MAX_RETRIES) {
-        console.warn(`⚠️ Error on attempt ${attempt}/${MAX_RETRIES}. Retrying...`, error);
-        await sleepMs(retryDelay);
-        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
-        continue;
-      }
-    }
-  }
-
-  throw lastError || new Error('Failed to call Google Gemini API after max retries');
-}
 
 function generateFormatPrompt(format: FormatType, wordCount: number): { systemPrompt: string; userPromptPrefix: string } {
   const formatPrompts: Record<FormatType, { systemPrompt: string; userPromptPrefix: string }> = {
@@ -626,102 +517,35 @@ CONSTRAINTS:
 }
 
 async function generateAINotes(text: string, outputType: FormatType = 'key-points', wordCount: number = 100): Promise<string> {
-  const apiKey = process.env.GOOGLE_GEMINI_API_KEY?.trim();
-  
-  if (!apiKey) {
-    console.warn('Google Gemini API key not found. Using placeholder notes.');
-    return `# Key Study Notes\n\n## Important Points\n\n${text.substring(0, 500)}...\n\n*Note: AI note generation requires Google Gemini API key.*`;
-  }
-
   try {
-    // Limit text to avoid token limits and memory issues
-    // Reduced from 12000 to 8000 to prevent memory problems
     const textToProcess = text.length > 8000 ? text.substring(0, 8000) + '\n\n[Content truncated for processing...]' : text;
-    
-    // Get format-specific prompts
     const { systemPrompt, userPromptPrefix } = generateFormatPrompt(outputType, wordCount);
     
-    const response = await callGeminiAPI([
-      {
-        role: 'system',
-        content: systemPrompt,
-      },
-      {
-        role: 'user',
-        content: `${userPromptPrefix}\n\n${textToProcess}`,
-      },
-    ], {
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `${userPromptPrefix}\n\n${textToProcess}` }
+    ];
+
+    const generatedNotes = await AiService.complete(messages, {
       temperature: 0.3,
       maxTokens: 2000,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Google Gemini API error:', response.status, errorText);
-      // Fallback to structured summary
-      return `# Key Study Notes\n\n## Summary\n\n${text.substring(0, 1500)}...\n\n*Note: AI generation failed. Showing text summary.*`;
-    }
-
-    const data = await response.json();
-    const generatedNotes = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
     if (!generatedNotes || generatedNotes.trim().length === 0) {
-      console.warn('AI returned empty notes, using fallback');
       return `# Key Study Notes\n\n## Important Points\n\n${text.substring(0, 1500)}...`;
     }
     
     return generatedNotes;
   } catch (error) {
     console.error('Error generating AI notes:', error);
-    return `# Key Study Notes\n\n## Summary\n\n${text.substring(0, 1500)}...\n\n*Note: Error generating AI notes. Showing text summary.*`;
+    return `# Key Study Notes\n\n## Summary\n\n${text.substring(0, 1500)}...\n\n*Note: AI processing error. Showing text summary.*`;
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json({ error: 'Missing Supabase configuration' }, { status: 500 });
-    }
-
-    // Try to get auth token from Authorization header first (from client)
-    const authHeader = request.headers.get('Authorization');
-    let user = null;
-    let authError = null;
-    let supabase;
-
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      // Use token from header
-      const token = authHeader.substring(7);
-      supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        global: {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      });
-      const { data: { user: tokenUser }, error: tokenError } = await supabase.auth.getUser();
-      user = tokenUser;
-      authError = tokenError;
-    } else {
-      // Fallback to cookies - create client without cookie options (will use default)
-      supabase = createClient(supabaseUrl, supabaseAnonKey);
-      const result = await supabase.auth.getUser();
-      user = result.data.user;
-      authError = result.error;
-    }
-
-    if (authError) {
-      console.error('Auth error:', authError.message);
-      return NextResponse.json({ error: `Authentication failed: ${authError.message}` }, { status: 401 });
-    }
-
-    if (!user) {
-      console.error('No user found - user not authenticated');
-      return NextResponse.json({ error: 'Please log in to upload files' }, { status: 401 });
-    }
+    // 1. Authentication
+    const { user, supabase } = await requireAuth(request);
 
     const formData = await request.formData();
     const collectionName = formData.get('collectionName') as string;

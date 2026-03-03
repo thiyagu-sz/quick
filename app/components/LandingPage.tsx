@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { CheckCircle, Zap, Shield, Sparkles, MessageSquare, Download, History, BookOpen, Clock, Presentation, FileText } from 'lucide-react';
 
 export default function LandingPage() {
   const router = useRouter();
@@ -115,15 +116,15 @@ export default function LandingPage() {
           <div className="hidden md:block w-px h-8 bg-gray-200"></div>
           <div className="flex items-center gap-6 opacity-70 grayscale hover:grayscale-0 transition-all">
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary">verified_user</span>
+              <Shield className="w-5 h-5 text-primary" />
               <span className="text-sm font-semibold">Secure</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary">bolt</span>
+              <Zap className="w-5 h-5 text-primary" />
               <span className="text-sm font-semibold">Fast</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-primary">lock</span>
+              <Shield className="w-5 h-5 text-primary" />
               <span className="text-sm font-semibold">Private</span>
             </div>
           </div>
@@ -140,7 +141,7 @@ export default function LandingPage() {
           {/* Feature 1 */}
           <div className="group flex flex-col gap-4 rounded-xl border border-[#cfcfe7] bg-white p-6 transition-all hover:border-primary/50 hover:shadow-soft hover:-translate-y-1">
             <div className="size-12 rounded-lg bg-blue-50 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[28px]">auto_awesome</span>
+              <Sparkles className="w-6 h-6" />
             </div>
             <div className="flex flex-col gap-2">
               <h4 className="text-text-main text-lg font-bold">Smart Summary</h4>
@@ -150,7 +151,7 @@ export default function LandingPage() {
           {/* Feature 2 */}
           <div className="group flex flex-col gap-4 rounded-xl border border-[#cfcfe7] bg-white p-6 transition-all hover:border-primary/50 hover:shadow-soft hover:-translate-y-1">
             <div className="size-12 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[28px]">chat_bubble</span>
+              <MessageSquare className="w-6 h-6" />
             </div>
             <div className="flex flex-col gap-2">
               <h4 className="text-text-main text-lg font-bold">Study Assistant</h4>
@@ -160,7 +161,7 @@ export default function LandingPage() {
           {/* Feature 3 */}
           <div className="group flex flex-col gap-4 rounded-xl border border-[#cfcfe7] bg-white p-6 transition-all hover:border-primary/50 hover:shadow-soft hover:-translate-y-1">
             <div className="size-12 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[28px]">ios_share</span>
+              <Download className="w-6 h-6" />
             </div>
             <div className="flex flex-col gap-2">
               <h4 className="text-text-main text-lg font-bold">Pro PDF Export</h4>
@@ -170,7 +171,7 @@ export default function LandingPage() {
           {/* Feature 4 */}
           <div className="group flex flex-col gap-4 rounded-xl border border-[#cfcfe7] bg-white p-6 transition-all hover:border-primary/50 hover:shadow-soft hover:-translate-y-1">
             <div className="size-12 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-              <span className="material-symbols-outlined text-[28px]">history</span>
+              <History className="w-6 h-6" />
             </div>
             <div className="flex flex-col gap-2">
               <h4 className="text-text-main text-lg font-bold">History Archive</h4>
@@ -193,7 +194,7 @@ export default function LandingPage() {
             {/* Step 1 */}
             <div className="flex flex-col items-center text-center gap-4">
               <div className="size-24 rounded-2xl bg-white border border-gray-100 shadow-lg flex items-center justify-center mb-4 relative z-10">
-                <span className="material-symbols-outlined text-[40px] text-blue-500">upload_file</span>
+                <FileText className="w-10 h-10 text-blue-500" />
                 <div className="absolute -top-3 -right-3 size-8 rounded-full bg-primary text-white flex items-center justify-center font-bold text-sm shadow-md">1</div>
               </div>
               <h3 className="text-xl font-bold text-text-main">Upload Materials</h3>
@@ -202,7 +203,7 @@ export default function LandingPage() {
             {/* Step 2 */}
             <div className="flex flex-col items-center text-center gap-4">
               <div className="size-24 rounded-2xl bg-white border border-gray-100 shadow-lg flex items-center justify-center mb-4 relative z-10">
-                <span className="material-symbols-outlined text-[40px] text-purple-500">auto_fix_high</span>
+                <Zap className="w-10 h-10 text-purple-500" />
                 <div className="absolute -top-3 -right-3 size-8 rounded-full bg-primary text-white flex items-center justify-center font-bold text-sm shadow-md">2</div>
               </div>
               <h3 className="text-xl font-bold text-text-main">AI Extraction</h3>
@@ -211,7 +212,7 @@ export default function LandingPage() {
             {/* Step 3 */}
             <div className="flex flex-col items-center text-center gap-4">
               <div className="size-24 rounded-2xl bg-white border border-gray-100 shadow-lg flex items-center justify-center mb-4 relative z-10">
-                <span className="material-symbols-outlined text-[40px] text-emerald-500">history_edu</span>
+                <Presentation className="w-10 h-10 text-emerald-500" />
                 <div className="absolute -top-3 -right-3 size-8 rounded-full bg-primary text-white flex items-center justify-center font-bold text-sm shadow-md">3</div>
               </div>
               <h3 className="text-xl font-bold text-text-main">Study & Ace</h3>
@@ -230,7 +231,7 @@ export default function LandingPage() {
           {/* Card 1 */}
           <div className="p-6 rounded-xl bg-gray-50 border border-transparent hover:border-gray-200 transition-colors">
             <div className="mb-4 inline-flex p-2 bg-white rounded-lg shadow-sm text-primary">
-              <span className="material-symbols-outlined">school</span>
+              <BookOpen className="w-6 h-6" />
             </div>
             <h3 className="text-lg font-bold text-text-main mb-2">Exam Prep</h3>
             <p className="text-text-muted text-sm">Condense semester-long courses into 5-page high-impact cheat sheets.</p>
@@ -238,7 +239,7 @@ export default function LandingPage() {
           {/* Card 2 */}
           <div className="p-6 rounded-xl bg-gray-50 border border-transparent hover:border-gray-200 transition-colors">
             <div className="mb-4 inline-flex p-2 bg-white rounded-lg shadow-sm text-orange-500">
-              <span className="material-symbols-outlined">timer</span>
+              <Clock className="w-6 h-6" />
             </div>
             <h3 className="text-lg font-bold text-text-main mb-2">Quick Revision</h3>
             <p className="text-text-muted text-sm">Extract key definitions and formulas minutes before your next lecture or test.</p>
@@ -246,7 +247,7 @@ export default function LandingPage() {
           {/* Card 3 */}
           <div className="p-6 rounded-xl bg-gray-50 border border-transparent hover:border-gray-200 transition-colors">
             <div className="mb-4 inline-flex p-2 bg-white rounded-lg shadow-sm text-pink-500">
-              <span className="material-symbols-outlined">slideshow</span>
+              <Presentation className="w-6 h-6" />
             </div>
             <h3 className="text-lg font-bold text-text-main mb-2">Slide Summaries</h3>
             <p className="text-text-muted text-sm">Turn 100+ PowerPoint slides into structured bullet points for fast reading.</p>
@@ -254,7 +255,7 @@ export default function LandingPage() {
           {/* Card 4 */}
           <div className="p-6 rounded-xl bg-gray-50 border border-transparent hover:border-gray-200 transition-colors">
             <div className="mb-4 inline-flex p-2 bg-white rounded-lg shadow-sm text-cyan-500">
-              <span className="material-symbols-outlined">assignment</span>
+              <FileText className="w-6 h-6" />
             </div>
             <h3 className="text-lg font-bold text-text-main mb-2">Research</h3>
             <p className="text-text-muted text-sm">Understand complex academic papers faster to write better assignments.</p>

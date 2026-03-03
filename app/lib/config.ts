@@ -1,0 +1,26 @@
+/**
+ * QuickNotes Production Configuration
+ */
+export const CONFIG = {
+  DEBUG_MODE: process.env.DEBUG_MODE === 'true',
+  AI: {
+    DEFAULT_MODEL: process.env.AI_MODEL || 'google/gemini-2.0-flash-001',
+    MAX_TOKENS: parseInt(process.env.AI_MAX_TOKENS || '4096', 10),
+    TEMPERATURE: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+    TIMEOUT: parseInt(process.env.AI_TIMEOUT || '30000', 10),
+    CONCURRENCY_LIMIT: parseInt(process.env.AI_CONCURRENCY || '8', 10),
+    RETRY_ATTEMPTS: 2,
+  },
+  RATE_LIMIT: {
+    MAX_REQUESTS_PER_MINUTE: 15,
+    WINDOW_MS: 60 * 1000,
+  },
+  DATABASE: {
+    TIMEOUT: 10000,
+  },
+  AUTH: {
+    SESSION_TTL: 3600,
+  }
+} as const;
+
+export default CONFIG;

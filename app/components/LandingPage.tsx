@@ -130,6 +130,182 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+            {/* Product Preview Section */}
+      <section className="py-24 px-4 md:px-10 bg-white">
+        <div className="max-w-7xl mx-auto">
+
+          {/* Section Heading */}
+          <div className="text-center mb-16">
+  <h2 className="text-4xl md:text-5xl font-extrabold text-text-main mb-6 tracking-tight">
+    Everything You Need<br/>To Ace Your Exams
+  </h2>
+  <p className="text-text-muted text-lg max-w-2xl mx-auto font-medium">
+    Generate MCQs, take quick tests, create smart summaries, and export polished notes in seconds.
+  </p>
+</div>
+
+          {/* 2x2 Grid Layout */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+
+            {/* Card 1 - Ultimate MCQ Generator */}
+            <div className="bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow group">
+              <div className="aspect-[16/10] bg-[#f9fafb] p-8 flex items-center justify-center relative overflow-hidden">
+                <div className="bg-white rounded-2xl shadow-xl border border-gray-100 w-full h-full p-6 flex flex-col gap-4 transform group-hover:scale-[1.02] transition-transform duration-500">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 rounded-full bg-primary"></div>
+                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Question 1 of 10</span>
+                  </div>
+                  <p className="text-xs font-bold text-gray-800 leading-relaxed">Which of the following best describes the function of mitochondria in a cell?</p>
+                  <div className="flex flex-col gap-2 mt-2">
+                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-[10px] text-gray-600">A) Protein synthesis and transport</div>
+                    <div className="p-2 rounded-lg border border-primary bg-blue-50 text-[10px] text-primary font-bold">B) Primary site of ATP production</div>
+                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-[10px] text-gray-600">C) Storage of genetic information</div>
+                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-[10px] text-gray-600">D) Breakdown of cellular waste</div>
+                  </div>
+                </div>
+              </div>
+              <div className="p-10 pt-8">
+                <h3 className="text-2xl font-bold text-text-main mb-3">
+                  Ultimate MCQ Generator
+                </h3>
+                <p className="text-text-muted text-base leading-relaxed font-medium">
+                  Automatically generate exam-style multiple choice questions directly from uploaded PDFs and lecture materials.
+                </p>
+              </div>
+            </div>
+
+            {/* Card 2 - Quick Test Mode */}
+            <div className="bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow group">
+              <div className="aspect-[16/10] bg-[#f9fafb] p-8 flex items-center justify-center relative">
+                <div className="w-full h-full flex flex-col justify-center gap-4">
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-gray-700">Easy</span>
+                      <span className="text-[10px] text-gray-400 font-medium text-left">Concept Check</span>
+                    </div>
+                    <div className="px-3 py-1 rounded-full bg-green-50 text-green-600 text-[10px] font-bold">Start</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-blue-100 flex items-center justify-between ring-2 ring-blue-50">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-gray-700">Medium</span>
+                      <span className="text-[10px] text-blue-500 font-medium text-left">Exam Standard</span>
+                    </div>
+                    <div className="px-3 py-1 rounded-full bg-primary text-white text-[10px] font-bold">Start</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between opacity-80 scale-95">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-gray-700">Hard</span>
+                      <span className="text-[10px] text-gray-400 font-medium text-left">Competitive Level</span>
+                    </div>
+                    <div className="px-3 py-1 rounded-full bg-gray-100 text-gray-400 text-[10px] font-bold">Locked</div>
+                  </div>
+                </div>
+              </div>
+              <div className="p-10 pt-8">
+                <h3 className="text-2xl font-bold text-text-main mb-3">
+                  Quick Test Mode
+                </h3>
+                <p className="text-text-muted text-base leading-relaxed font-medium">
+                  Instantly test your knowledge using AI-powered quizzes categorized by difficulty levels.
+                </p>
+              </div>
+            </div>
+
+            {/* Card 3 - Summary Notes */}
+            <div className="bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow group">
+              <div className="aspect-[16/10] bg-[#f9fafb] p-8 flex items-center justify-center relative overflow-hidden">
+                <div className="bg-white rounded-2xl shadow-xl border border-gray-100 w-full h-full p-6 flex flex-col gap-3 transform group-hover:scale-[1.02] transition-transform duration-500">
+                  <div className="h-2 w-1/3 bg-gray-100 rounded-full mb-2"></div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 size-1.5 rounded-full bg-primary shrink-0"></div>
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-2 w-full bg-gray-100 rounded-full"></div>
+                      <div className="h-2 w-4/5 bg-gray-50 rounded-full text-[8px] flex items-center px-2 font-bold text-gray-400">Key Definitions Extracted</div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 size-1.5 rounded-full bg-indigo-400 shrink-0"></div>
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-2 w-full bg-gray-100 rounded-full"></div>
+                      <div className="h-2 w-3/4 bg-indigo-50 rounded-full text-[8px] flex items-center px-2 font-bold text-indigo-400">Important Formulas Highlighted</div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 size-1.5 rounded-full bg-emerald-400 shrink-0"></div>
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-2 w-full bg-gray-100 rounded-full"></div>
+                      <div className="h-2 w-5/6 bg-emerald-50 rounded-full text-[8px] flex items-center px-2 font-bold text-emerald-400">Exam-Focused Bullet Points</div>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 size-1.5 rounded-full bg-purple-400 shrink-0"></div>
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-2 w-full bg-gray-100 rounded-full"></div>
+                      <div className="h-2 w-2/3 bg-purple-50 rounded-full text-[8px] flex items-center px-2 font-bold text-purple-400">Structured Topic Breakdown</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="p-10 pt-8">
+                <h3 className="text-2xl font-bold text-text-main mb-3">
+                  Summary Notes
+                </h3>
+                <p className="text-text-muted text-base leading-relaxed font-medium">
+                  Convert long textbooks and slides into structured, exam-ready summaries in seconds.
+                </p>
+              </div>
+            </div>
+
+            {/* Card 4 - Ultimate PDF & Document Export */}
+            <div className="bg-white rounded-[32px] border border-gray-100 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow group">
+              <div className="aspect-[16/10] bg-[#f9fafb] p-8 flex items-center justify-center relative">
+                <div className="w-full h-full flex flex-col justify-center gap-3">
+                  <div className="bg-white p-4 rounded-2xl shadow-md border border-gray-100 flex items-center gap-4 hover:border-primary/30 transition-colors">
+                    <div className="size-10 rounded-xl bg-red-50 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-red-500" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-gray-700">PDF Export</span>
+                      <span className="text-[10px] text-gray-400 font-medium">Print Ready</span>
+                    </div>
+                    <Download className="w-4 h-4 text-gray-300 ml-auto" />
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl shadow-md border border-gray-100 flex items-center gap-4 hover:border-primary/30 transition-colors">
+                    <div className="size-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-blue-500" />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-gray-700">DOCX Export</span>
+                      <span className="text-[10px] text-gray-400 font-medium">Editable</span>
+                    </div>
+                    <Download className="w-4 h-4 text-gray-300 ml-auto" />
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl shadow-md border border-gray-100 flex items-center gap-4 hover:border-primary/30 transition-colors">
+                    <div className="size-10 rounded-xl bg-emerald-50 flex items-center justify-center">
+                      <Shield className="w-5 h-5 text-emerald-500" />
+                    </div>
+                    <div className="flex flex-col text-left">
+                      <span className="text-xs font-bold text-gray-700">Structured Clean Format</span>
+                      <span className="text-[10px] text-gray-400 font-medium">Optimized for reading</span>
+                    </div>
+                    <Download className="w-4 h-4 text-gray-300 ml-auto" />
+                  </div>
+                </div>
+              </div>
+              <div className="p-10 pt-8">
+                <h3 className="text-2xl font-bold text-text-main mb-3">
+                  Ultimate PDF & Document Export
+                </h3>
+                <p className="text-text-muted text-base leading-relaxed font-medium">
+                  Download beautifully formatted notes as PDF or editable documents for printing or sharing.
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
 
       {/* Features Grid */}
       <section className="py-20 px-4 md:px-10 max-w-7xl mx-auto" id="features">

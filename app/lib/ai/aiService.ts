@@ -144,8 +144,8 @@ export class AiService {
               const timeoutId = setTimeout(() => abortController.abort(), finalConfig.timeout);
 
               try {
-                const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-                if (!apiKey) throw new Error('GOOGLE_GEMINI_API_KEY is not configured');
+                const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+                if (!apiKey) throw new Error('GOOGLE_GENERATIVE_AI_API_KEY is not configured');
 
                 // Extract model name from currentModel
                 const modelName = currentModel.includes('/') 
@@ -270,8 +270,8 @@ export class AiService {
         const timeoutId = setTimeout(() => abortController.abort(), finalConfig.timeout);
 
         try {
-          const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
-          if (!apiKey) throw new Error('GOOGLE_GEMINI_API_KEY is not configured');
+          const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+          if (!apiKey) throw new Error('GOOGLE_GENERATIVE_AI_API_KEY is not configured');
 
           const modelName = finalConfig.model.includes('/') 
             ? finalConfig.model.split('/').pop() 

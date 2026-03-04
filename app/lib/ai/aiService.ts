@@ -26,10 +26,10 @@ const DEFAULT_CONFIG: AiConfig = {
 
 // Fallback models if primary is busy
 const FALLBACK_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-flash-latest',
-  'gemini-2.0-flash-lite',
-  'gemini-pro-latest'
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-flash-latest'
 ];
 
 /**
@@ -80,6 +80,14 @@ export class AiService {
     const message = error?.message || '';
     const status = parseInt(message.match(/\((\d+)\)/)?.[1] || '0');
 
+    // 🚀 LOG FULL ERROR FOR DEVELOPER (Visible in server console)
+    console.error(`[AiService] AI Call Error Context:`, {
+      status,
+      message,
+      name: error.name,
+      timestamp: new Date().toISOString()
+    });
+
     if (error.name === 'AbortError' || message.includes('timeout')) {
       return "Our AI service is temporarily busy. Please retry.";
     }
@@ -88,11 +96,15 @@ export class AiService {
       return "We're currently optimizing our AI engine due to high demand. Please try again shortly.";
     }
 
-    if (status === 401 || message.includes('auth') || message.includes('key')) {
-      return "AI service authentication error. Please contact support.";
+    if (status === 401 || status === 403 || message.includes('auth') || message.includes('key') || message.includes('permission')) {
+      return "AI service authentication error. Your API key might be invalid or not authorized for this model. Please contact support.";
     }
 
-    return "We've encountered a temporary hiccup. Please try again in a moment.";
+    if (status === 400) {
+      return "The AI engine received an invalid request. This could be due to safety filters or context length. Try a different question.";
+    }
+
+    return "We've encountered a temporary hiccup. Please try again or check if Generative Language API is enabled in your Google Cloud project.";
   }
 
   /**
@@ -145,7 +157,13 @@ export class AiService {
 
               try {
                 const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-                if (!apiKey) throw new Error('GOOGLE_GENERATIVE_AI_API_KEY is not configured');
+                if (!apiKey) {
+                  console.error('[AiService] GOOGLE_GENERATIVE_AI_API_KEY is missing from process.env');
+                  throw new Error('GOOGLE_GENERATIVE_AI_API_KEY is not configured');
+                }
+                
+                // Debug log (masked)
+                console.log(`[AiService] Using API Key: ${apiKey.substring(0, 6)}...${apiKey.substring(apiKey.length - 3)}`);
 
                 // Extract model name from currentModel
                 const modelName = currentModel.includes('/') 
@@ -175,6 +193,7 @@ export class AiService {
                 if (!response.ok) {
                   const errorData = await response.text();
                   const errorStatus = response.status;
+                  console.error(`[AiService] Gemini API error (${errorStatus}):`, errorData);
                   
                   // If rate limited or service busy, try next model or retry
                   if (errorStatus === 429 || errorStatus === 503) {
@@ -189,17 +208,22 @@ export class AiService {
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
+                let lineBuffer = '';
 
                 while (true) {
                   const { done, value } = await reader.read();
                   if (done) break;
 
-                  const chunk = decoder.decode(value);
-                  const lines = chunk.split('\n');
+                  const chunk = decoder.decode(value, { stream: true });
+                  lineBuffer += chunk;
+                  
+                  const lines = lineBuffer.split('\n');
+                  lineBuffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
 
                   for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                      const dataStr = line.slice(6);
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.startsWith('data: ')) {
+                      const dataStr = trimmedLine.slice(6);
                       try {
                         const parsed = JSON.parse(dataStr);
                         const content = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -240,6 +264,7 @@ export class AiService {
           throw lastError;
 
         } catch (error: any) {
+          console.error('[AiService] Fatal error in streamChat:', error);
           const safeMessage = AiService.getSafeUserMessage(error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: safeMessage })}\n\n`));
           controller.close();
@@ -301,6 +326,7 @@ export class AiService {
 
           if (!response.ok) {
             const errorData = await response.text();
+            console.error(`[AiService] Gemini API error (${response.status}):`, errorData);
             throw new Error(`Gemini API error (${response.status}): ${errorData}`);
           }
 

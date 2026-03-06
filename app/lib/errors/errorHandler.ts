@@ -20,14 +20,14 @@ export class AppError extends Error {
  * Maps technical errors to user-friendly SaaS messages
  */
 const ERROR_MAP: Record<string, string> = {
-  '429': "We're currently optimizing our AI engine due to high demand. Please try again shortly.",
-  'RATE_LIMIT': "We're currently optimizing our AI engine due to high demand. Please try again shortly.",
-  'TIMEOUT': "Our AI service is temporarily busy. Your request was not lost. Please retry.",
-  '401': "Your session has expired. Please log in again.",
-  'UNAUTHORIZED': "Your session has expired. Please log in again.",
-  '500': "We've encountered a temporary hiccup in our AI processing. Our engineers are on it.",
-  'ECONNREFUSED': "Connection to our AI service was interrupted. Please check your internet or try again later.",
-  'ABORT_ERROR': "The request was cancelled or timed out. Please try again.",
+  '429': "The AI model is currently busy. Please try again in a moment.",
+  'RATE_LIMIT': "The AI model is currently busy. Please try again in a moment.",
+  'TIMEOUT': "The AI model is currently busy. Please try again in a moment.",
+  '401': "Our AI service is temporarily unavailable.",
+  'UNAUTHORIZED': "Our AI service is temporarily unavailable.",
+  '500': "Our AI service is temporarily unavailable.",
+  'ECONNREFUSED': "Our AI service is temporarily unavailable.",
+  'ABORT_ERROR': "The AI model is currently busy. Please try again in a moment.",
 };
 
 /**
@@ -100,10 +100,9 @@ export class ErrorHandler {
     return NextResponse.json(
       {
         success: false,
+        message, // friendly message at top level as requested
         error: {
-          message,
           code,
-          requestId: typeof window === 'undefined' ? undefined : undefined, // Placeholder for request tracing
         },
       },
       { status: statusCode }

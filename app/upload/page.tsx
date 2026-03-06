@@ -266,7 +266,7 @@ export default function UploadPage() {
 
       if (!response.ok) {
         const error = await response.json();
-        const errorMessage = error.error || 'Upload failed';
+        const errorMessage = error.message || error.error || 'Upload failed';
         const errorDetails = error.details ? `\n\n${error.details}` : '';
         const errorList = error.errors ? `\n\nErrors:\n${error.errors.map((e: string) => `- ${e}`).join('\n')}` : '';
         throw new Error(`${errorMessage}${errorDetails}${errorList}`);

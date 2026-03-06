@@ -772,7 +772,7 @@ ${userInput}`,
         let errorMessage = `API error (${response.status})`;
         try {
           const errorJson = JSON.parse(errorData);
-          errorMessage = errorJson.error?.message || errorJson.error || errorMessage;
+          errorMessage = errorJson.message || errorJson.error?.message || errorJson.error || errorMessage;
         } catch {
           errorMessage = errorData.substring(0, 200) || errorMessage;
         }
@@ -898,15 +898,15 @@ ${userInput}`,
       }
     } catch (error) {
       console.error('❌ Chat error:', error);
-      const errorDetails = error instanceof Error ? error.message : 'Unknown error occurred';
+      const errorDetails = error instanceof Error ? error.message : 'Our AI service is temporarily unavailable.';
       const errorMessage: Message = {
         id: (Date.now() + 2).toString(),
         role: 'assistant',
-        content: `Error: ${errorDetails}\n\nPlease check:\n1. Your Google Gemini API key is set in .env.local\n2. The API key is valid\n3. Your internet connection is working\n\nTry refreshing the page and asking again.`,
+        content: errorDetails,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
-      showToastMessage(`Error: ${errorDetails}`);
+      showToastMessage(errorDetails);
     } finally {
       console.log('🏁 handleSend finished, setting isLoading to false');
       setIsLoading(false);

@@ -21,23 +21,17 @@ const DEFAULT_CONFIG: AiConfig = {
   timeout: CONFIG.AI.TIMEOUT,
   concurrencyLimit: CONFIG.AI.CONCURRENCY_LIMIT,
   retryAttempts: CONFIG.AI.RETRY_ATTEMPTS,
-  initialRetryDelay: 500,
+  initialRetryDelay: 1000, // 1s as requested
 };
 
-// Fallback models if primary is busy
 const FALLBACK_MODELS = [
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-1.5-flash-8b',
-  'gemini-1.5-flash-latest'
+  CONFIG.AI.FALLBACK_MODEL,
+  'meta-llama/llama-3-8b-instruct:free',
+  'google/gemini-2.0-flash-001'
 ];
 
 /**
  * ⚠️ SERVERLESS LIMITATION: This semaphore is in-memory.
- * On Vercel, concurrent requests may run in separate instances.
- * This only limits concurrency within a single warm instance.
- * For true cross-instance limits, migrate to Upstash Redis:
- * https://upstash.com/docs/redis/sdks/ratelimit-ts/overview
  */
 class Semaphore {
   private count: number;
@@ -70,18 +64,18 @@ class Semaphore {
 const globalSemaphore = new Semaphore(DEFAULT_CONFIG.concurrencyLimit);
 
 /**
- * Central AI Service Layer (Native Google Gemini)
+ * Central AI Service Layer (OpenRouter / AI Agnostic)
  */
 export class AiService {
   /**
-   * Returns a user-friendly error message based on the internal error
+   * Returns a user-friendly error message
    */
   private static getSafeUserMessage(error: any): string {
     const message = error?.message || '';
-    const status = parseInt(message.match(/\((\d+)\)/)?.[1] || '0');
+    const status = error?.status || 0;
 
-    // 🚀 LOG FULL ERROR FOR DEVELOPER (Visible in server console)
-    console.error(`[AiService] AI Call Error Context:`, {
+    // Internal Logging
+    console.error("AI API ERROR:", {
       status,
       message,
       name: error.name,
@@ -89,190 +83,236 @@ export class AiService {
     });
 
     if (error.name === 'AbortError' || message.includes('timeout')) {
-      return "Our AI service is temporarily busy. Please retry.";
+      return "The AI model is currently busy. Please try again in a moment.";
     }
     
-    if (status === 429 || message.includes('rate limit') || message.includes('quota')) {
-      return "We're currently optimizing our AI engine due to high demand. Please try again shortly.";
+    if (status === 429 || message.includes('rate limit')) {
+      return "The AI model is currently busy. Please try again in a moment.";
     }
 
-    if (status === 401 || status === 403 || message.includes('auth') || message.includes('key') || message.includes('permission')) {
-      return "AI service authentication error. Your API key might be invalid or not authorized for this model. Please contact support.";
+    if (status === 401 || status === 403 || message.includes('auth') || message.includes('key')) {
+      return "Our AI service is temporarily unavailable.";
     }
 
-    if (status === 400) {
-      return "The AI engine received an invalid request. This could be due to safety filters or context length. Try a different question.";
-    }
-
-    return "We've encountered a temporary hiccup. Please try again or check if Generative Language API is enabled in your Google Cloud project.";
+    return "Our AI service is temporarily unavailable. Please try again shortly.";
   }
 
   /**
-   * Maps standard messages to Google Gemini format
+   * Centralized AI Request Handler with Retry & Fallback
    */
-  private static mapToGemini(messages: { role: string; content: string }[]) {
-    // Separate system message if present
-    const systemMessage = messages.find(m => m.role === 'system');
-    const chatMessages = messages.filter(m => m.role !== 'system');
+  static async safeAIRequest(
+    messages: { role: string; content: string }[],
+    options: Partial<AiConfig> = {},
+    isStreaming: boolean = false
+  ): Promise<any> {
+    const config = { ...DEFAULT_CONFIG, ...options };
+    
+    // API Key Validation
+    if (!process.env.OPENROUTER_API_KEY) {
+      console.error("[AiService] OPENROUTER_API_KEY is missing");
+      throw new Error("API key missing");
+    }
 
-    return {
-      contents: chatMessages.map(m => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }]
-      })),
-      system_instruction: systemMessage ? {
-        parts: [{ text: systemMessage.content }]
-      } : undefined
-    };
+    let lastError: any = null;
+    const modelsToTry = [config.model, ...FALLBACK_MODELS.filter(m => m !== config.model)];
+
+    // Concurrency Protection
+    await globalSemaphore.acquire();
+
+    try {
+      for (const currentModel of modelsToTry) {
+        let retryDelay = config.initialRetryDelay;
+
+        for (let attempt = 0; attempt <= config.retryAttempts; attempt++) {
+          const abortController = new AbortController();
+          const timeoutId = setTimeout(() => abortController.abort(), config.timeout);
+
+          try {
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                "HTTP-Referer": "https://quicknotes.ai", // Required by OpenRouter
+                "X-Title": "QuickNotes",
+              },
+              signal: abortController.signal,
+              body: JSON.stringify({
+                model: currentModel,
+                messages,
+                max_tokens: config.maxTokens,
+                temperature: config.temperature,
+                stream: isStreaming,
+              }),
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              const error = new Error(errorData.error?.message || `Request failed with status ${response.status}`);
+              (error as any).status = response.status;
+              throw error;
+            }
+
+            // SUCCESS!
+            if (isStreaming) {
+              return response.body;
+            } else {
+              const data = await response.json();
+              return data.choices?.[0]?.message?.content || "";
+            }
+
+          } catch (error: any) {
+            clearTimeout(timeoutId);
+            lastError = error;
+
+            // Retry Logic: Only retry on network errors, timeouts, or rate limits
+            const isRetryable = 
+              error.name === 'AbortError' || 
+              error.status === 429 || 
+              error.status >= 500 ||
+              error.message.includes('fetch');
+
+            if (isRetryable && attempt < config.retryAttempts) {
+              console.warn(`[AiService] Attempt ${attempt + 1} failed for ${currentModel}. Retrying in ${retryDelay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay));
+              retryDelay *= 2; // Exponential Backoff: 1s -> 2s -> 4s
+              continue;
+            }
+
+            // If not retryable or max attempts reached for this model, break and try next model
+            break;
+          }
+        }
+      }
+
+      // If we reach here, all models and retries failed
+      throw lastError;
+
+    } finally {
+      globalSemaphore.release();
+    }
   }
 
   /**
-   * Generates a streaming chat response with concurrency control, timeout, and retries.
-   * Includes 🚀 PROFESSIONAL MODEL FALLBACK strategy
+   * Generates embeddings for text (OpenAI)
+   */
+  static async generateEmbedding(text: string): Promise<number[]> {
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    
+    const generateFallbackEmbedding = (inputText: string): number[] => {
+      const hash = inputText.split('').reduce((acc, char) => {
+        const hash = ((acc << 5) - acc) + char.charCodeAt(0);
+        return hash & hash;
+      }, 0);
+      return new Array(384).fill(0).map((_, i) => Math.sin((hash + i) * 0.1) * 0.1);
+    };
+    
+    if (!apiKey || apiKey === '' || apiKey === 'your_openai_api_key_here') {
+      return generateFallbackEmbedding(text);
+    }
+
+    let retryDelay = 1000;
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      try {
+        const response = await fetch('https://api.openai.com/v1/embeddings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'text-embedding-3-small',
+            input: text,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          return data.data?.[0]?.embedding || generateFallbackEmbedding(text);
+        }
+
+        if (response.status === 429 && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay *= 2;
+          continue;
+        }
+
+        break;
+      } catch (error) {
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          retryDelay *= 2;
+          continue;
+        }
+      }
+    }
+
+    return generateFallbackEmbedding(text);
+  }
+
+  /**
+   * Generates a streaming chat response
    */
   static async streamChat(
     messages: { role: string; content: string }[],
     config: Partial<AiConfig> = {}
   ): Promise<ReadableStream> {
-    const finalConfig = { ...DEFAULT_CONFIG, ...config };
+    const encoder = new TextEncoder();
     
-    return new ReadableStream({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        const startTime = Date.now();
-        
-        try {
-          await globalSemaphore.acquire();
-          
-          let lastError: any = null;
-          let retryDelay = finalConfig.initialRetryDelay;
-          
-          // Try primary model first, then fall back on 429/Busy errors
-          const modelsToTry = [finalConfig.model, ...FALLBACK_MODELS.filter(m => m !== finalConfig.model)];
+    try {
+      const body = await this.safeAIRequest(messages, config, true);
+      if (!body) throw new Error("No response body");
 
-          for (const currentModel of modelsToTry) {
-            for (let attempt = 0; attempt <= finalConfig.retryAttempts; attempt++) {
-              const abortController = new AbortController();
-              const timeoutId = setTimeout(() => abortController.abort(), finalConfig.timeout);
+      return new ReadableStream({
+        async start(controller) {
+          const reader = body.getReader();
+          const decoder = new TextDecoder();
+          let lineBuffer = "";
 
-              try {
-                const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-                if (!apiKey) {
-                  console.error('[AiService] GOOGLE_GENERATIVE_AI_API_KEY is missing from process.env');
-                  throw new Error('GOOGLE_GENERATIVE_AI_API_KEY is not configured');
-                }
-                
-                // Debug log (masked)
-                console.log(`[AiService] Using API Key: ${apiKey.substring(0, 6)}...${apiKey.substring(apiKey.length - 3)}`);
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
 
-                // Extract model name from currentModel
-                const modelName = currentModel.includes('/') 
-                  ? currentModel.split('/').pop() 
-                  : currentModel;
+              lineBuffer += decoder.decode(value, { stream: true });
+              const lines = lineBuffer.split("\n");
+              lineBuffer = lines.pop() || "";
 
-                const geminiPayload = AiService.mapToGemini(messages);
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed === "data: [DONE]") continue;
 
-                const response = await fetch(
-                  `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${apiKey}`,
-                  {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: abortController.signal,
-                    body: JSON.stringify({
-                      ...geminiPayload,
-                      generationConfig: {
-                        maxOutputTokens: finalConfig.maxTokens,
-                        temperature: finalConfig.temperature,
-                      },
-                    }),
-                  }
-                );
-
-                clearTimeout(timeoutId);
-
-                if (!response.ok) {
-                  const errorData = await response.text();
-                  const errorStatus = response.status;
-                  console.error(`[AiService] Gemini API error (${errorStatus}):`, errorData);
-                  
-                  // If rate limited or service busy, try next model or retry
-                  if (errorStatus === 429 || errorStatus === 503) {
-                    console.warn(`[AiService] Model ${currentModel} rate limited (${errorStatus}).`);
-                    throw new Error(`Gemini API error (${errorStatus}): ${errorData}`);
-                  }
-                  
-                  throw new Error(`Gemini API error (${errorStatus}): ${errorData}`);
-                }
-
-                if (!response.body) throw new Error('No response body from AI');
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let lineBuffer = '';
-
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-
-                  const chunk = decoder.decode(value, { stream: true });
-                  lineBuffer += chunk;
-                  
-                  const lines = lineBuffer.split('\n');
-                  lineBuffer = lines.pop() || ''; // Keep the last incomplete line in the buffer
-
-                  for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    if (trimmedLine.startsWith('data: ')) {
-                      const dataStr = trimmedLine.slice(6);
-                      try {
-                        const parsed = JSON.parse(dataStr);
-                        const content = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-                        if (content) {
-                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-                        }
-                      } catch (e) {}
+                if (trimmed.startsWith("data: ")) {
+                  try {
+                    const data = JSON.parse(trimmed.slice(6));
+                    const content = data.choices?.[0]?.delta?.content;
+                    if (content) {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
                     }
+                  } catch (e) {
+                    // Ignore malformed JSON chunks
                   }
-                }
-
-                console.log(`[AiService] Success using ${currentModel} on attempt ${attempt + 1}`);
-                controller.close();
-                return; // 🚀 COMPLETE SUCCESS
-
-              } catch (error: any) {
-                clearTimeout(timeoutId);
-                lastError = error;
-                const status = parseInt(error.message.match(/\((\d+)\)/)?.[1] || '0');
-
-                // Logic for next attempt or next model
-                if (status === 429 || status === 503 || error.name === 'AbortError') {
-                  if (attempt < finalConfig.retryAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, retryDelay));
-                    retryDelay *= 2;
-                    continue; // Retry SAME model
-                  }
-                  // If all retries failed for THIS model, the loop moves to next model in modelsToTry
-                } else {
-                  // Fatal error (401, 400), don't bother retrying or falling back
-                  throw error;
                 }
               }
             }
+            controller.close();
+          } catch (error) {
+            controller.error(error);
           }
+        }
+      });
 
-          // If we exhaust all models
-          throw lastError;
-
-        } catch (error: any) {
-          console.error('[AiService] Fatal error in streamChat:', error);
+    } catch (error: any) {
+      return new ReadableStream({
+        start(controller) {
           const safeMessage = AiService.getSafeUserMessage(error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: safeMessage })}\n\n`));
           controller.close();
-        } finally {
-          globalSemaphore.release();
         }
-      }
-    });
+      });
+    }
   }
 
   /**
@@ -282,89 +322,10 @@ export class AiService {
     messages: { role: string; content: string }[],
     config: Partial<AiConfig> = {}
   ): Promise<string> {
-    const finalConfig = { ...DEFAULT_CONFIG, ...config };
-    await globalSemaphore.acquire();
-    const startTime = Date.now();
-
     try {
-      let lastError: any = null;
-      let retryDelay = finalConfig.initialRetryDelay;
-
-      for (let attempt = 0; attempt <= finalConfig.retryAttempts; attempt++) {
-        const abortController = new AbortController();
-        const timeoutId = setTimeout(() => abortController.abort(), finalConfig.timeout);
-
-        try {
-          const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-          if (!apiKey) throw new Error('GOOGLE_GENERATIVE_AI_API_KEY is not configured');
-
-          const modelName = finalConfig.model.includes('/') 
-            ? finalConfig.model.split('/').pop() 
-            : finalConfig.model;
-
-          const geminiPayload = AiService.mapToGemini(messages);
-
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              signal: abortController.signal,
-              body: JSON.stringify({
-                ...geminiPayload,
-                generationConfig: {
-                  maxOutputTokens: finalConfig.maxTokens,
-                  temperature: finalConfig.temperature,
-                },
-              }),
-            }
-          );
-
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            const errorData = await response.text();
-            console.error(`[AiService] Gemini API error (${response.status}):`, errorData);
-            throw new Error(`Gemini API error (${response.status}): ${errorData}`);
-          }
-
-          const data = await response.json();
-          const duration = Date.now() - startTime;
-          console.log(JSON.stringify({
-            type: 'AI_CALL_METRICS',
-            model: finalConfig.model,
-            duration,
-            status: 'success',
-            attempt: attempt + 1
-          }));
-          
-          return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-        } catch (error: any) {
-          clearTimeout(timeoutId);
-          lastError = error;
-          if (attempt < finalConfig.retryAttempts) {
-            await new Promise(resolve => setTimeout(resolve, retryDelay));
-            retryDelay *= 2;
-            continue;
-          }
-        }
-      }
-      throw lastError;
+      return await this.safeAIRequest(messages, config, false);
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      console.error(JSON.stringify({
-        type: 'AI_CALL_METRICS',
-        model: finalConfig.model,
-        duration,
-        status: 'error',
-        error: error.message
-      }));
       throw new AppError(AiService.getSafeUserMessage(error), 500, 'AI_ERROR', error);
-    } finally {
-      globalSemaphore.release();
     }
   }
 }

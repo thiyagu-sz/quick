@@ -297,43 +297,6 @@ async function extractTextFromFile(file: File): Promise<string> {
   }
 }
 
-async function generateEmbedding(text: string): Promise<number[]> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  
-  if (!apiKey) {
-    console.warn('OpenAI API key not found. Using simple text-based embedding fallback.');
-    // Return a simple hash-based embedding (not ideal but works for basic functionality)
-    const hash = text.split('').reduce((acc, char) => {
-      const hash = ((acc << 5) - acc) + char.charCodeAt(0);
-      return hash & hash;
-    }, 0);
-    // Return a 384-dimensional vector (common embedding size) based on text hash
-    const embedding = new Array(384).fill(0).map((_, i) => 
-      Math.sin((hash + i) * 0.1) * 0.1
-    );
-    return embedding;
-  }
-
-  const response = await fetch('https://api.openai.com/v1/embeddings', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'text-embedding-3-small', // Embedding models are usually fixed/tied to DB schema
-      input: text,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to generate embedding');
-  }
-
-  const data = await response.json();
-  return data.data[0].embedding;
-}
-
 type FormatType = 'key-points' | 'main-concepts' | 'exam-points' | 'short-notes' | 'speech-notes' | 'presentation-notes' | 'summary' | 'mcqs' | 'quick-test';
 
 function generateFormatPrompt(format: FormatType, wordCount: number): { systemPrompt: string; userPromptPrefix: string } {
@@ -658,9 +621,11 @@ export async function POST(request: NextRequest) {
           .from('documents')
           .getPublicUrl(fileName);
 
+        // Optional: Generate embedding for search using centralized AiService
+        // console.log(`Generating embedding for ${file.name}...`);
+        // const embedding = await AiService.generateEmbedding(extractedText.substring(0, 1000));
+        
         // Skip embedding generation for now to save memory
-        // Embeddings can be generated later if needed for search
-        // This significantly reduces memory usage
         console.log(`⏭️ Skipping embedding generation for ${chunks.length} chunks to save memory`);
         
         // Optional: Save chunks without embeddings (for future use)

@@ -9,46 +9,6 @@ import { requireAuth } from '@/app/lib/auth/requireAuth';
 const MAX_CONTEXT_CHUNKS = 5;
 
 /**
- * Generate embedding for text (OpenAI with fallback)
- */
-async function generateEmbedding(text: string): Promise<number[]> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  
-  const generateFallbackEmbedding = (inputText: string): number[] => {
-    const hash = inputText.split('').reduce((acc, char) => {
-      const hash = ((acc << 5) - acc) + char.charCodeAt(0);
-      return hash & hash;
-    }, 0);
-    return new Array(384).fill(0).map((_, i) => Math.sin((hash + i) * 0.1) * 0.1);
-  };
-  
-  if (!apiKey || apiKey === '' || apiKey === 'your_openai_api_key_here') {
-    return generateFallbackEmbedding(text);
-  }
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'text-embedding-3-small',
-        input: text,
-      }),
-    });
-
-    if (!response.ok) return generateFallbackEmbedding(text);
-
-    const data = await response.json();
-    return data.data?.[0]?.embedding || generateFallbackEmbedding(text);
-  } catch (error) {
-    return generateFallbackEmbedding(text);
-  }
-}
-
-/**
  * RAG: Search for similar document chunks
  */
 async function searchSimilarChunks(
@@ -152,7 +112,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 6. RAG & Context Preparation
-    const embedding = await generateEmbedding(question);
+    const embedding = await AiService.generateEmbedding(question);
     const chunks = await searchSimilarChunks(supabase, user.id, embedding);
     
     const context = chunks.map((c: any) => c.content).join('\n\n---\n\n');

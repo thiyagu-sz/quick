@@ -5,6 +5,9 @@ import { CONFIG } from '@/app/lib/config';
 import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
 
+export const maxDuration = 60;
+export const runtime = "nodejs";
+
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const ALLOWED_TYPES = [
   'application/pdf',
@@ -567,7 +570,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Process all files
-    const allExtractedText: string[] = [];
     const uploadedDocuments: any[] = [];
     const extractionErrors: string[] = [];
 
@@ -584,7 +586,6 @@ export async function POST(request: NextRequest) {
           const errorMsg = extractError instanceof Error ? extractError.message : String(extractError);
           console.error(`❌ Error extracting text from ${file.name}:`, errorMsg);
           extractionErrors.push(`${file.name}: ${errorMsg}`);
-          // Continue with other files, but log the error
           continue;
         }
 
@@ -594,45 +595,7 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        allExtractedText.push(extractedText);
-
-        // Chunk the text
-        const chunks = chunkText(extractedText, 1000, 200);
-
-        // Upload file to Supabase Storage
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${user.id}/${Date.now()}-${file.name}`;
-        const fileBuffer = await file.arrayBuffer();
-
-        const { error: uploadError } = await supabase.storage
-          .from('documents')
-          .upload(fileName, fileBuffer, {
-            contentType: file.type,
-            upsert: false,
-          });
-
-        if (uploadError) {
-          console.error('Storage upload error:', uploadError);
-          continue; // Skip this file but continue with others
-        }
-
-        // Get public URL
-        const { data: urlData } = supabase.storage
-          .from('documents')
-          .getPublicUrl(fileName);
-
-        // Optional: Generate embedding for search using centralized AiService
-        // console.log(`Generating embedding for ${file.name}...`);
-        // const embedding = await AiService.generateEmbedding(extractedText.substring(0, 1000));
-        
-        // Skip embedding generation for now to save memory
-        console.log(`⏭️ Skipping embedding generation for ${chunks.length} chunks to save memory`);
-        
-        // Optional: Save chunks without embeddings (for future use)
-        // We'll skip this to save memory and processing time
-        const documentChunks: any[] = [];
-
-        // Save file directly to document_collections (matching your schema)
+        // Save file directly to document_collections with status pending
         const { data: documentData, error: documentError } = await supabase
           .from('document_collections')
           .insert({
@@ -641,197 +604,38 @@ export async function POST(request: NextRequest) {
             file_name: file.name,
             file_type: file.type,
             file_size: file.size,
-            content: extractedText, // Store extracted text
-            embedding: null, // Will be set if needed for search
+            content: extractedText,
+            status: 'pending',
           })
           .select()
           .single();
 
         if (documentError) {
           console.error(`❌ Document collection insert error for ${file.name}:`, documentError);
-          console.error('Error details:', {
-            code: documentError.code,
-            message: documentError.message,
-            details: documentError.details,
-            hint: documentError.hint,
-          });
-          
-          // Check if table doesn't exist
-          if (documentError.code === 'PGRST116' || documentError.message?.includes('does not exist')) {
-            console.error('⚠️ document_collections table does not exist! Please run the SQL schema from SUPABASE_SCHEMA.md');
-            // Still continue to try generating notes, but warn the user
-          }
-          
-          // Don't continue - we want to know about this error
-          // But we'll still try to generate notes from the extracted text
-          console.warn(`⚠️ File ${file.name} was not saved to database, but text was extracted. Continuing...`);
         } else {
-          console.log(`✅ Saved file ${file.name} to document_collections (ID: ${documentData.id})`);
-        }
-
-        // Also save to documents table for compatibility (if it exists)
-        try {
-          await supabase
-            .from('documents')
-            .insert({
-              user_id: user.id,
-              file_name: file.name,
-              file_size: file.size,
-              content: extractedText,
-              embedding: null,
-            });
-        } catch (error) {
-          // Documents table might not exist or have different structure - that's okay
-          console.warn('Could not save to documents table:', error);
-        }
-
-        // Only add to uploadedDocuments if document was successfully saved
-        if (documentData) {
           uploadedDocuments.push({
             id: documentData.id,
             name: documentData.file_name,
-            status: 'completed',
-          });
-        } else {
-          // Even if save failed, track that we processed the file
-          uploadedDocuments.push({
-            id: `temp-${Date.now()}-${Math.random()}`,
-            name: file.name,
-            status: 'error',
+            status: 'pending',
           });
         }
       } catch (error) {
         console.error(`Error processing file ${file.name}:`, error);
-        // Continue with other files
       }
     }
 
-    // Generate AI notes from all extracted text
-    if (allExtractedText.length === 0) {
-      console.error('❌ No text extracted from any files');
-      console.error(`Processed ${files.length} files, but extractedText array is empty`);
-      console.error('Extraction errors:', extractionErrors);
-      return NextResponse.json(
-        { 
-          error: 'Could not extract text from uploaded files. Please check if files are valid PDF, DOCX, or TXT files.',
-          details: `Tried to process ${files.length} file(s) but no text was extracted.`,
-          errors: extractionErrors.length > 0 ? extractionErrors : ['Unknown error during text extraction']
-        },
-        { status: 400 }
-      );
-    }
-
-    // Limit combined text to prevent memory issues
-    // Use first 50000 characters max (about 10-15 pages of text)
-    const combinedText = allExtractedText.join('\n\n--- Document Separator ---\n\n');
-    const maxTextLength = 50000; // Limit to ~50KB of text
-    const textToProcess = combinedText.length > maxTextLength 
-      ? combinedText.substring(0, maxTextLength) + '\n\n[Content truncated due to size limits...]'
-      : combinedText;
-    
-    console.log(`📝 Generating AI notes from ${textToProcess.length} characters of text (${combinedText.length} total available)...`);
-    console.log(`🎨 Output format: ${outputType}, Word count: ${wordCount}`);
-    
-    const aiNotes = await generateAINotes(textToProcess, outputType, wordCount);
-    
-    if (!aiNotes || aiNotes.trim().length === 0) {
-      console.error('❌ AI notes generation returned empty result');
-      return NextResponse.json(
-        { error: 'Failed to generate notes. Please try again or check your Google Gemini API key.' },
-        { status: 500 }
-      );
-    }
-    
-    console.log(`✅ Generated notes (${aiNotes.length} characters)`);
-
-    // Save notes to database
-    console.log(`💾 Saving notes to database for collection ${collectionData.id}...`);
-    const { data: notesData, error: notesError } = await supabase
-      .from('notes')
-      .insert({
-        collection_id: collectionData.id,
-        user_id: user.id,
-        content: aiNotes,
-      })
-      .select()
-      .single();
-
-    if (notesError) {
-      console.error('❌ Notes insert error:', notesError);
-      console.error('Error details:', {
-        code: notesError.code,
-        message: notesError.message,
-        details: notesError.details,
-        hint: notesError.hint,
-      });
-      
-      if (notesError.code === 'PGRST116' || notesError.message?.includes('does not exist')) {
-        console.error('⚠️ notes table does not exist! Please run the SQL schema from SUPABASE_SCHEMA.md');
-        return NextResponse.json(
-          { 
-            error: 'Notes table does not exist. Please run the SQL schema from SUPABASE_SCHEMA.md',
-            collection: {
-              id: collectionData.id,
-              name: collectionData.name,
-            },
-            notesGenerated: true, // Notes were generated but not saved
-            notesContent: aiNotes.substring(0, 500) + '...', // Return preview
-          },
-          { status: 500 }
-        );
-      }
-      
-      // Don't fail the whole request if notes fail, but log it
-      console.warn('⚠️ Notes were generated but could not be saved to database');
-      console.warn('⚠️ Generated notes preview:', aiNotes.substring(0, 200) + '...');
-      
-      // Still return success, but indicate notes weren't saved
-      return NextResponse.json({
-        success: true,
-        collection: {
-          id: collectionData.id,
-          name: collectionData.name,
-        },
-        documents: uploadedDocuments.map((doc) => ({
-          id: doc.id,
-          name: doc.name,
-          status: doc.status,
-        })),
-        notesId: null,
-        notesSaved: false,
-        notesGenerated: true,
-        error: `Notes were generated but could not be saved: ${notesError.message}`,
-        filesSaved: uploadedDocuments.filter(doc => doc.status === 'completed').length,
-        totalFiles: uploadedDocuments.length,
-      });
-    } else {
-      console.log(`✅ Notes saved successfully! (ID: ${notesData.id})`);
-    }
-
-    console.log(`✅ Upload complete! Collection: ${collectionData.name}, Files: ${uploadedDocuments.length}, Notes: ${notesData ? 'saved' : 'failed to save'}`);
-    
+    // Return immediately after creating records and storing text
     return NextResponse.json({
       success: true,
-      collection: {
-        id: collectionData.id,
-        name: collectionData.name,
-      },
-      documents: uploadedDocuments.map((doc) => ({
-        id: doc.id,
-        name: doc.name,
-        status: doc.status,
-      })),
-      notesId: notesData?.id,
-      notesSaved: !!notesData,
-      filesSaved: uploadedDocuments.filter(doc => doc.status === 'completed').length,
-      totalFiles: uploadedDocuments.length,
-    });
+      collectionId: collectionData.id,
+      status: "processing",
+      message: "Your documents are being processed. Notes will appear shortly.",
+      documents: uploadedDocuments
+    }, { status: 202 });
+
   } catch (error) {
-    console.error('Upload error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    console.error('Upload route error:', error);
+    return ErrorHandler.handle(error, 'POST /api/upload');
   }
 }
 

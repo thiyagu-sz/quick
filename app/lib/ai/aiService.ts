@@ -30,38 +30,8 @@ const FALLBACK_MODELS = [
   'google/gemini-2.0-flash-001'
 ];
 
-/**
- * ⚠️ SERVERLESS LIMITATION: This semaphore is in-memory.
- */
-class Semaphore {
-  private count: number;
-  private queue: Array<() => void> = [];
-
-  constructor(limit: number) {
-    this.count = limit;
-  }
-
-  async acquire(): Promise<void> {
-    if (this.count > 0) {
-      this.count--;
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      this.queue.push(resolve);
-    });
-  }
-
-  release(): void {
-    if (this.queue.length > 0) {
-      const next = this.queue.shift();
-      if (next) next();
-    } else {
-      this.count++;
-    }
-  }
-}
-
-const globalSemaphore = new Semaphore(DEFAULT_CONFIG.concurrencyLimit);
+// NOTE: In-memory semaphores are ineffective on Vercel serverless.
+// Global concurrency is enforced via Upstash Redis rate limiting in middleware.ts.
 
 /**
  * Central AI Service Layer (OpenRouter / AI Agnostic)
@@ -106,93 +76,100 @@ export class AiService {
     isStreaming: boolean = false
   ): Promise<any> {
     const config = { ...DEFAULT_CONFIG, ...options };
+    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
     
     // API Key Validation
-    if (!process.env.OPENROUTER_API_KEY) {
+    if (!apiKey) {
       console.error("[AiService] OPENROUTER_API_KEY is missing");
       throw new Error("API key missing");
     }
 
     let lastError: any = null;
-    const modelsToTry = [config.model, ...FALLBACK_MODELS.filter(m => m !== config.model)];
+    // Limit to max 2 models: Primary + 1 Fallback
+    const modelsToTry = [config.model, CONFIG.AI.FALLBACK_MODEL].filter((m, i, self) => self.indexOf(m) === i).slice(0, 2);
 
-    // Concurrency Protection
-    await globalSemaphore.acquire();
+    for (const currentModel of modelsToTry) {
+      // Max 2 retry attempts per model
+      const maxRetries = 2;
 
-    try {
-      for (const currentModel of modelsToTry) {
-        let retryDelay = config.initialRetryDelay;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), config.timeout);
 
-        for (let attempt = 0; attempt <= config.retryAttempts; attempt++) {
-          const abortController = new AbortController();
-          const timeoutId = setTimeout(() => abortController.abort(), config.timeout);
+        try {
+          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKey}`,
+              "HTTP-Referer": "https://quicknotes.ai", // Required by OpenRouter
+              "X-Title": "QuickNotes",
+            },
+            signal: abortController.signal,
+            body: JSON.stringify({
+              model: currentModel,
+              messages,
+              max_tokens: config.maxTokens,
+              temperature: config.temperature,
+              stream: isStreaming,
+            }),
+          });
 
-          try {
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                "HTTP-Referer": "https://quicknotes.ai", // Required by OpenRouter
-                "X-Title": "QuickNotes",
-              },
-              signal: abortController.signal,
-              body: JSON.stringify({
-                model: currentModel,
-                messages,
-                max_tokens: config.maxTokens,
-                temperature: config.temperature,
-                stream: isStreaming,
-              }),
-            });
+          clearTimeout(timeoutId);
 
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({}));
-              const error = new Error(errorData.error?.message || `Request failed with status ${response.status}`);
-              (error as any).status = response.status;
-              throw error;
-            }
-
-            // SUCCESS!
-            if (isStreaming) {
-              return response.body;
-            } else {
-              const data = await response.json();
-              return data.choices?.[0]?.message?.content || "";
-            }
-
-          } catch (error: any) {
-            clearTimeout(timeoutId);
-            lastError = error;
-
-            // Retry Logic: Only retry on network errors, timeouts, or rate limits
-            const isRetryable = 
-              error.name === 'AbortError' || 
-              error.status === 429 || 
-              error.status >= 500 ||
-              error.message.includes('fetch');
-
-            if (isRetryable && attempt < config.retryAttempts) {
-              console.warn(`[AiService] Attempt ${attempt + 1} failed for ${currentModel}. Retrying in ${retryDelay}ms...`);
-              await new Promise(resolve => setTimeout(resolve, retryDelay));
-              retryDelay *= 2; // Exponential Backoff: 1s -> 2s -> 4s
-              continue;
-            }
-
-            // If not retryable or max attempts reached for this model, break and try next model
-            break;
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const error = new Error(errorData.error?.message || `Request failed with status ${response.status}`);
+            (error as any).status = response.status;
+            throw error;
           }
+
+          // SUCCESS!
+          if (isStreaming) {
+            return response.body;
+          } else {
+            const data = await response.json();
+            return data.choices?.[0]?.message?.content || "";
+          }
+
+        } catch (error: any) {
+          clearTimeout(timeoutId);
+          lastError = error;
+          const status = error.status;
+
+          console.error(`[AI] Model ${currentModel} attempt ${attempt} failed with ${status || error.name}`);
+
+          // Fail-fast: bad key — do not retry any model
+          if (status === 401) {
+            throw new Error("API key is invalid or out of credits. Contact support.");
+          }
+
+          // Do not fall back on bad requests — prompt is the issue
+          if (status === 400) {
+            throw new Error("Invalid request. Please check your input.");
+          }
+
+          // Retryable: rate limit or server error
+          if ((status === 429 || status === 503 || status === 504 || error.name === 'AbortError') && attempt < maxRetries) {
+            // Jittered exponential backoff: (2^attempt * 1000) + random
+            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+            console.warn(`[AiService] Retrying ${currentModel} in ${Math.round(delay)}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          // Only fall back on 429, 503, 504 for next model
+          const isFallbackable = status === 429 || status === 503 || status === 504 || error.name === 'AbortError';
+          if (!isFallbackable) {
+            throw error;
+          }
+          
+          break; // try next model
         }
       }
-
-      // If we reach here, all models and retries failed
-      throw lastError;
-
-    } finally {
-      globalSemaphore.release();
     }
+
+    throw lastError || new Error("AI service is temporarily unavailable. Please try again in a moment.");
   }
 
   /**

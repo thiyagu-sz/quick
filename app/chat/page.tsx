@@ -31,6 +31,25 @@ interface Message {
 
 type FormatType = 'key-points' | 'main-concepts' | 'exam-points' | 'short-notes' | 'speech-notes' | 'presentation-notes' | 'summary' | 'mcqs' | 'quick-test';
 
+// Helper to sanitize AI error messages for users
+function sanitizeAIError(message: string): string {
+  const msg = message.toLowerCase();
+  if (msg.includes("401") || msg.includes("unauthorized") || msg.includes("api key")) {
+    return "Service configuration error. Please contact support.";
+  }
+  if (msg.includes("429") || msg.includes("rate limit")) {
+    return "Too many requests. Please wait a moment and try again.";
+  }
+  if (msg.includes("503") || msg.includes("temporarily")) {
+    return "AI service is temporarily busy. Please try again in 30 seconds.";
+  }
+  if (msg.includes("504") || msg.includes("timeout")) {
+    return "Request timed out. Try a shorter document or fewer files.";
+  }
+  // Default: hide technical details
+  return "Something went wrong. Please try again.";
+}
+
 function ChatContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -46,6 +65,7 @@ function ChatContent() {
   const [customWordCount, setCustomWordCount] = useState<string>('');
   const [questionCount, setQuestionCount] = useState<number>(5);
   const [showToast, setShowToast] = useState({ show: false, message: '' });
+  const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
@@ -99,6 +119,23 @@ function ChatContent() {
       console.error('Error loading chat history:', error);
     }
   }, []);
+
+  // Handle retry countdown
+  useEffect(() => {
+    if (retryCountdown === null || retryCountdown <= 0) {
+      if (retryCountdown === 0) {
+        setRetryCountdown(null);
+        handleSend();
+      }
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setRetryCountdown(prev => (prev !== null && prev > 0) ? prev - 1 : 0);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [retryCountdown]);
 
   // Handle Mobile Keyboard and Visual Viewport
 
@@ -766,6 +803,13 @@ ${userInput}`,
 
       console.log('📥 API Response:', response.status, response.statusText);
 
+      if (response.status === 429 || response.status === 503) {
+        const errorData = await response.json().catch(() => ({}));
+        const retryAfter = errorData.retryAfter ?? 15;
+        setRetryCountdown(retryAfter);
+        throw new Error(sanitizeAIError(`API error (${response.status})`));
+      }
+
       if (!response.ok) {
         const errorData = await response.text();
         console.error('❌ API error:', response.status, errorData);
@@ -898,7 +942,8 @@ ${userInput}`,
       }
     } catch (error) {
       console.error('❌ Chat error:', error);
-      const errorDetails = error instanceof Error ? error.message : 'Our AI service is temporarily unavailable.';
+      const rawMessage = error instanceof Error ? error.message : 'Our AI service is temporarily unavailable.';
+      const errorDetails = sanitizeAIError(rawMessage);
       const errorMessage: Message = {
         id: (Date.now() + 2).toString(),
         role: 'assistant',

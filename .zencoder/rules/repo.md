@@ -29,7 +29,7 @@ The project follows the **Next.js App Router** architecture:
 **Main Dependencies**:
 - **Framework**: `next` (16.1.1), `react` (19.2.3), `react-dom`
 - **AI/LLM**: `OpenRouter API` (Inference), `deepseek/deepseek-r1` (Default), `meta-llama/llama-3.3-70b-instruct` (Fallback)
-- **Backend/BaaS**: `@supabase/supabase-js`, `@supabase/auth-helpers-nextjs`, `@supabase/ssr`
+- **Backend/BaaS**: `@supabase/supabase-js`, `@supabase/ssr`, `@supabase/auth-helpers-nextjs`
 - **Rate Limiting**: `@upstash/ratelimit`, `@upstash/redis` (Redis-backed global limit: 10 req/min/user)
 - **Document Parsing**: `pdfjs-dist`, `mammoth`, `pdf-parse`, `pdf2json`
 - **Export/PDF**: `jspdf`, `puppeteer`
@@ -61,7 +61,7 @@ npm start
 **Framework**: Jest with `ts-jest` for unit/integration; Playwright for E2E.  
 **Test Location**: `**/__tests__/**/*.ts(x)` or `**/*.test.ts(x)`.  
 **Naming Convention**: `*.test.ts`, `*.test.tsx`.  
-**Configuration**: `jest.config.js`, `jest.setup.js`.
+**Configuration**: `jest.config.js`, `jest.setup.js`, `playwright.config.ts`.
 
 **Run Command**:
 ```bash
@@ -75,22 +75,16 @@ npx playwright test
 ## Main Files & Resources
 - **Frontend Entry**: `app/page.tsx`
 - **API Endpoints**:
-  - `app/api/upload/route.ts`: Document processing and text extraction (non-blocking, returns 202).
+  - `app/api/upload/route.ts`: Document processing and text extraction.
   - `app/api/chat/route.ts`: LLM-powered chat orchestration with SSE streaming.
   - `app/api/notes/generate/route.ts`: Background note generation worker.
 - **Configuration**:
   - `app/lib/config.ts`: Centralized application settings (AI models, timeouts, rate limits).
-  - `middleware.ts`: Edge rate limiter using Upstash Redis.
+  - `middleware.ts`: Edge rate limiter and proxy configuration.
   - `next.config.ts`: Next.js configuration.
   - `tsconfig.json`: TypeScript configuration.
 - **Documentation**:
   - `README.md`: Project overview and quick start.
   - `docs/ML-SYSTEM-DESIGN.md`: Machine Learning system design details.
   - `ENV_SETUP.md`: Environment variable requirements.
-
-## AI Error Handling
-The `AiService` (in `app/lib/ai/aiService.ts`) implements a `getSafeUserMessage` method that sanitizes technical API errors:
-- **401/403/Auth Errors**: Returns `"Our AI service is temporarily unavailable."`
-- **429/Rate Limits**: Returns `"The AI model is currently busy. Please try again in a moment."`
-- **504/Timeouts**: Returns `"The AI model is currently busy. Please try again in a moment."`
-- **Retry Strategy**: Jittered exponential backoff (2 retries per model) with fail-fast on 401.
+  - `SUPABASE_SCHEMA.md`: Database schema and RLS policies.

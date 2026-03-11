@@ -46,7 +46,7 @@ export default function LoginPage() {
     try {
       const supabase = getSupabaseClient();
       // Always use window.location.origin to ensure correct redirect for both localhost and production
-      const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/chat` : '/chat';
+      const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : '/auth/callback';
       const { error: signInError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

@@ -61,7 +61,7 @@ export class AiService {
     }
 
     if (status === 401 || status === 403 || message.includes('auth') || message.includes('key')) {
-      return "Our AI service is temporarily unavailable.";
+      return `Our AI service is temporarily unavailable. (Status: ${status}, Message: ${message.substring(0, 50)})`;
     }
 
     return "Our AI service is temporarily unavailable. Please try again shortly.";
@@ -76,100 +76,88 @@ export class AiService {
     isStreaming: boolean = false
   ): Promise<any> {
     const config = { ...DEFAULT_CONFIG, ...options };
-    const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
     
     // API Key Validation
     if (!apiKey) {
-      console.error("[AiService] OPENROUTER_API_KEY is missing");
+      console.error("[AiService] GOOGLE_GENERATIVE_AI_API_KEY is missing");
       throw new Error("API key missing");
     }
 
-    let lastError: any = null;
-    // Limit to max 2 models: Primary + 1 Fallback
-    const modelsToTry = [config.model, CONFIG.AI.FALLBACK_MODEL].filter((m, i, self) => self.indexOf(m) === i).slice(0, 2);
+    const model = 'models/gemini-2.0-flash';
+    const maxRetries = 2;
 
-    for (const currentModel of modelsToTry) {
-      // Max 2 retry attempts per model
-      const maxRetries = 2;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), config.timeout);
 
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        const abortController = new AbortController();
-        const timeoutId = setTimeout(() => abortController.abort(), config.timeout);
+      try {
+        // Convert messages to Google Gemini format
+        const contents = messages.map(m => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }]
+        }));
 
-        try {
-          const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${apiKey}`,
-              "HTTP-Referer": "https://quicknotes.ai", // Required by OpenRouter
-              "X-Title": "QuickNotes",
-            },
-            signal: abortController.signal,
-            body: JSON.stringify({
-              model: currentModel,
-              messages,
-              max_tokens: config.maxTokens,
+        const endpoint = isStreaming 
+          ? `https://generativelanguage.googleapis.com/v1/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`
+          : `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`;
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          signal: abortController.signal,
+          body: JSON.stringify({
+            contents,
+            generationConfig: {
+              maxOutputTokens: config.maxTokens,
               temperature: config.temperature,
-              stream: isStreaming,
-            }),
-          });
+            }
+          }),
+        });
 
-          clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            const error = new Error(errorData.error?.message || `Request failed with status ${response.status}`);
-            (error as any).status = response.status;
-            throw error;
-          }
-
-          // SUCCESS!
-          if (isStreaming) {
-            return response.body;
-          } else {
-            const data = await response.json();
-            return data.choices?.[0]?.message?.content || "";
-          }
-
-        } catch (error: any) {
-          clearTimeout(timeoutId);
-          lastError = error;
-          const status = error.status;
-
-          console.error(`[AI] Model ${currentModel} attempt ${attempt} failed with ${status || error.name}`);
-
-          // Fail-fast: bad key — do not retry any model
-          if (status === 401) {
-            throw new Error("API key is invalid or out of credits. Contact support.");
-          }
-
-          // Do not fall back on bad requests — prompt is the issue
-          if (status === 400) {
-            throw new Error("Invalid request. Please check your input.");
-          }
-
-          // Retryable: rate limit or server error
-          if ((status === 429 || status === 503 || status === 504 || error.name === 'AbortError') && attempt < maxRetries) {
-            // Jittered exponential backoff: (2^attempt * 1000) + random
-            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
-            console.warn(`[AiService] Retrying ${currentModel} in ${Math.round(delay)}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
-
-          // Only fall back on 429, 503, 504 for next model
-          const isFallbackable = status === 429 || status === 503 || status === 504 || error.name === 'AbortError';
-          if (!isFallbackable) {
-            throw error;
-          }
-          
-          break; // try next model
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const error = new Error(errorData.error?.message || `Request failed with status ${response.status}`);
+          (error as any).status = response.status;
+          throw error;
         }
+
+        if (isStreaming) {
+          return response.body;
+        } else {
+          const data = await response.json();
+          return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        }
+
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        const status = error.status;
+
+        console.error(`[AI] Model ${model} attempt ${attempt} failed with ${status || error.name}`);
+
+        if (status === 401) {
+          throw new Error("API key is invalid or out of credits. Contact support.");
+        }
+
+        if (status === 400) {
+          throw new Error("Invalid request. Please check your input.");
+        }
+
+        if ((status === 429 || status === 503 || status === 504 || error.name === 'AbortError') && attempt < maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        throw error;
       }
     }
 
-    throw lastError || new Error("AI service is temporarily unavailable. Please try again in a moment.");
+    throw new Error("AI service is temporarily unavailable. Please try again in a moment.");
   }
 
   /**
@@ -264,7 +252,7 @@ export class AiService {
                 if (trimmed.startsWith("data: ")) {
                   try {
                     const data = JSON.parse(trimmed.slice(6));
-                    const content = data.choices?.[0]?.delta?.content;
+                    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
                     if (content) {
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
                     }

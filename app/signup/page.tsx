@@ -50,6 +50,7 @@ export default function SignupPage() {
         email,
         password,
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             full_name: fullName,
           },
@@ -78,7 +79,7 @@ export default function SignupPage() {
       const { error: signInError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/chat`,
+          redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 
@@ -98,7 +99,7 @@ export default function SignupPage() {
       const { error: signInError } = await supabase.auth.signInWithOAuth({
         provider: 'github',
         options: {
-          redirectTo: `${window.location.origin}/chat`,
+          redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 

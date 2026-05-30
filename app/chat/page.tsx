@@ -242,19 +242,19 @@ function ChatContent() {
   // ✅ FIX: Debounced save to prevent race conditions
   const saveDraftToLocalStorage = useCallback(async () => {
     if (!user?.id || !saveChat) return;
-    
+
+    const payload = {
+      messages,
+      meta: {
+        currentConversationId,
+        saveChat,
+        selectedFormat,
+        wordCount,
+      },
+      savedAt: new Date().toISOString(),
+    };
+
     try {
-      const payload = {
-        messages,
-        meta: {
-          currentConversationId,
-          saveChat,
-          selectedFormat,
-          wordCount,
-        },
-        savedAt: new Date().toISOString(),
-      };
-      
       localStorage.setItem(getStorageKey(user.id), JSON.stringify(payload));
       console.log('✅ Draft saved to localStorage');
     } catch (e) {

@@ -22,7 +22,7 @@ export async function middleware(req: NextRequest) {
   const userId =
     req.headers.get("x-user-id") ||
     req.cookies.get("sb-access-token")?.value ||
-    req.ip ||
+    req.headers.get("x-forwarded-for")?.split(",")[0] ||
     "anonymous";
 
   try {

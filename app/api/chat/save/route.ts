@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { upstashRedis } from '@/app/lib/rateLimiter.redis';
+
+export const maxDuration = 15;
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
@@ -212,6 +216,14 @@ export async function POST(request: NextRequest) {
           error: 'Failed to save messages',
           details: errorMessage 
         }, { status: 500 });
+      }
+    }
+
+    // Invalidate per-user history cache so new/updated chat appears in sidebar immediately.
+    // Use the already-authenticated user.id — conversation.user_id is not always selected.
+    if (upstashRedis) {
+      for (const limit of [3, 10, 50]) {
+        upstashRedis.del(`chat-history:${user.id}:${limit}`).catch(() => {});
       }
     }
 

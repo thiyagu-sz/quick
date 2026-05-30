@@ -321,8 +321,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
 .cover::before{content:'';position:absolute;top:-100px;right:-60px;width:420px;height:420px;background:radial-gradient(circle,rgba(94,78,255,.28) 0%,transparent 68%);pointer-events:none}
 .cover::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#5e4eff 30%,#00b4ff 70%,transparent)}
-.cover-brand{display:flex;align-items:center;gap:14px;margin-bottom:60px}
-.cover-brand svg{width:38px;height:38px}
+.cover-brand{margin-bottom:60px}
 .cover-brand-name{font-size:14pt;font-weight:600;letter-spacing:.08em;color:rgba(255,255,255,.75);text-transform:uppercase}
 .cover-title{font-size:28pt;font-weight:700;line-height:1.2;margin-bottom:22px;max-width:540px;letter-spacing:-.01em}
 .cover-divider{width:40px;height:2px;background:linear-gradient(90deg,#5e4eff,#00b4ff);border-radius:2px;margin:0 auto 36px}
@@ -430,14 +429,6 @@ del{text-decoration:line-through;color:#888899;opacity:.8}
 
 <div class="cover">
   <div class="cover-brand">
-    <svg viewBox="0 0 100 100" fill="none">
-      <defs><linearGradient id="cg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#5e4eff"/><stop offset="100%" stop-color="#00b4ff"/></linearGradient></defs>
-      <polygon points="30,20 70,20 85,35 45,35" fill="url(#cg)" opacity=".9"/>
-      <polygon points="70,20 85,35 85,75 70,60" fill="#4a3fd9" opacity=".8"/>
-      <polygon points="30,20 45,35 45,75 30,60" fill="#6e5dff" opacity=".7"/>
-      <polygon points="45,35 85,35 85,75 45,75" fill="url(#cg)" opacity=".6"/>
-      <polygon points="30,60 45,75 85,75 70,60" fill="#3a2fcf" opacity=".85"/>
-    </svg>
     <span class="cover-brand-name">QuickNotes</span>
   </div>
   <div class="cover-title">${esc(title)}</div>

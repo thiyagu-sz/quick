@@ -121,8 +121,8 @@ export default function Sidebar({ user }: SidebarProps) {
     try {
       const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
-      
-      // Limit to 3 conversations for sidebar display
+
+      // Primary: fetch via API (cached, rate-limited)
       const response = await fetch('/api/chat/history?limit=3', {
         headers: {
           ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
@@ -132,13 +132,28 @@ export default function Sidebar({ user }: SidebarProps) {
       if (response.ok) {
         const data = await response.json();
         const conversations = data.conversations || [];
-        console.log('Chat history loaded:', conversations.length, 'conversations');
-        console.log('Conversations:', conversations);
         setChatHistory(conversations);
+
+        // Fallback: if API returned empty but user is authenticated, query Supabase directly
+        // (guards against Redis cache staleness or transient API errors)
+        if (conversations.length === 0 && userId) {
+          const { data: direct } = await supabase
+            .from('chat_conversations')
+            .select('id, title, created_at, updated_at')
+            .eq('user_id', userId)
+            .order('updated_at', { ascending: false })
+            .limit(3);
+          if (direct && direct.length > 0) setChatHistory(direct as any);
+        }
       } else {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Failed to load chat history:', response.status, errorData);
-        setChatHistory([]);
+        // API failed — go directly to Supabase
+        const { data: direct } = await supabase
+          .from('chat_conversations')
+          .select('id, title, created_at, updated_at')
+          .eq('user_id', userId)
+          .order('updated_at', { ascending: false })
+          .limit(3);
+        setChatHistory((direct as any) || []);
       }
     } catch (error) {
       console.error('Error loading chat history:', error);

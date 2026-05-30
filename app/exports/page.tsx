@@ -15,7 +15,6 @@ import {
   Copy,
 } from 'lucide-react';
 import Link from 'next/link';
-import { jsPDF } from 'jspdf';
 import { copyToClipboard, extractTextFromMarkdown } from '@/app/lib/clipboard';
 
 interface Export {
@@ -187,84 +186,43 @@ export default function ExportsPage() {
   };
 
   const handleExport = async (exportItem: Export) => {
+    if (!exportItem.content || !exportItem.content.trim()) {
+      setStatusModal({ show: true, type: 'warning', title: 'No Content', message: 'No content available for export' });
+      return;
+    }
+
     try {
-      if (!exportItem.content || !exportItem.content.trim()) {
-        setStatusModal({
-          show: true,
-          type: 'warning',
-          title: 'No Content',
-          message: 'No content available for export',
+      const supabase = getSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+
+      // Use the professional PDF renderer (returns printable HTML)
+      const response = await fetch('/api/chat/pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
+        },
+        body: JSON.stringify({ markdown: exportItem.content, title: exportItem.title }),
+      });
+
+      if (!response.ok) throw new Error(`PDF generation failed: ${response.status}`);
+
+      const html = await response.text();
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      // Auto-trigger print dialog after the window loads
+      if (win) {
+        win.addEventListener('load', () => {
+          setTimeout(() => { win.print(); URL.revokeObjectURL(url); }, 500);
         });
-        return;
+      } else {
+        URL.revokeObjectURL(url);
+        setStatusModal({ show: true, type: 'warning', title: 'Popup Blocked', message: 'Allow popups for this site, then try again.' });
       }
-
-      // Clean content (remove markdown bold markers, keep structure)
-      const cleanContent = (exportItem.content || '').replace(/\*\*/g, '').trim();
-
-      // Create PDF directly
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      // Set font and styling
-      doc.setFont('helvetica');
-      
-      // Add title
-      doc.setFontSize(18);
-      doc.setFont('helvetica', 'bold');
-      doc.text(exportItem.title, 20, 20);
-      
-      // Add a line under title
-      doc.setLineWidth(0.5);
-      doc.line(20, 25, 190, 25);
-      
-      // Add content
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'normal');
-      
-      // Split content into lines that fit the page width
-      const pageWidth = 170; // 210mm - 20mm margins on each side
-      const lineHeight = 7;
-      const maxLinesPerPage = 38; // Approximate lines per page
-      
-      const lines = doc.splitTextToSize(cleanContent, pageWidth);
-      let yPosition = 35;
-      let currentPage = 1;
-      
-      for (let i = 0; i < lines.length; i++) {
-        if (yPosition > 280) { // Near bottom of page
-          doc.addPage();
-          currentPage++;
-          yPosition = 20;
-        }
-        doc.text(lines[i], 20, yPosition);
-        yPosition += lineHeight;
-      }
-      
-      // Add page numbers
-      const totalPages = doc.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Page ${i} of ${totalPages}`, 105, 290, { align: 'center' });
-      }
-      
-      // Save the PDF
-      const filename = `${exportItem.title.replace(/[^a-z0-9]/gi, '_')}.pdf`;
-      doc.save(filename);
     } catch (error) {
-      console.error('Error exporting:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Export error details:', errorMessage);
-      setStatusModal({
-        show: true,
-        type: 'error',
-        title: 'Export Failed',
-        message: `Failed to export: ${errorMessage}. Please try again.`,
-      });
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      setStatusModal({ show: true, type: 'error', title: 'Export Failed', message: `${msg}. Please try again.` });
     }
   };
 

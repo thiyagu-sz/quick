@@ -177,20 +177,114 @@ function markdownToHtml(md: string): string {
   return html;
 }
 
-// ─── Intro extractor ──────────────────────────────────────────────────────────
+// ─── Smart title extraction ───────────────────────────────────────────────────
 
-function extractIntro(md: string): string {
-  for (const line of md.split('\n')) {
-    const t = line.trim();
-    if (t && !/^[#\-*|>`]/.test(t) && t.length > 15)
-      return t.replace(/\*\*/g, '').replace(/_/g, '').substring(0, 200);
+/** Strip all markdown markers from a heading string. */
+function cleanHeading(s: string): string {
+  return s.replace(/\*\*/g, '').replace(/\*/g, '').replace(/_/g, '')
+          .replace(/`/g, '').replace(/[#\[\]]/g, '').trim();
+}
+
+/** Title-case a string, treating common minor words correctly. */
+function toTitleCase(s: string): string {
+  const minor = new Set(['a','an','the','and','but','or','for','nor','on','at','to','by','in','of','up','as','vs']);
+  return s.split(' ').map((w, i) => {
+    if (!w) return w;
+    return (i > 0 && minor.has(w.toLowerCase())) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1);
+  }).join(' ');
+}
+
+/** Stop-words ignored when deriving a topic from headings. */
+const STOP = new Set([
+  'the','a','an','and','or','but','in','on','at','to','for','of','with','by','from',
+  'is','are','was','were','be','been','have','has','had','do','does','did',
+  'will','would','could','should','may','might','can',
+  'introduction','overview','summary','notes','key','points','concepts',
+  'topics','study','types','uses','applications','examples','definition',
+  'important','basic','advanced','chapter','unit','module','part',
+]);
+
+/**
+ * Find the most-prominent topic noun(s) from a set of heading strings.
+ * Returns a title-cased phrase (1–3 words) or empty string if nothing found.
+ */
+function dominantTopic(headings: string[]): string {
+  const freq: Record<string, number> = {};
+  for (const h of headings) {
+    for (const w of h.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)) {
+      if (w.length > 2 && !STOP.has(w)) freq[w] = (freq[w] || 0) + 1;
+    }
   }
-  return 'AI-generated study material from QuickNotes';
+  const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
+  if (!sorted.length) return '';
+
+  const top = sorted.slice(0, 3).map(([w]) => w);
+  // Prefer a two-word phrase that appears adjacent in any heading
+  if (top.length >= 2) {
+    const pair = `${top[0]} ${top[1]}`;
+    if (headings.some(h => h.toLowerCase().includes(pair))) return toTitleCase(pair);
+  }
+  return toTitleCase(top[0]);
+}
+
+/**
+ * Choose a professional suffix that matches the content type.
+ * e.g. MCQ → "Quiz", architecture-heavy → "Architecture and Concepts"
+ */
+function contentSuffix(md: string): string {
+  const lower = md.toLowerCase();
+  const lines = md.split('\n');
+  if (lines.filter(l => /^Q\d+\./.test(l.trim())).length >= 3) return 'Quiz';
+  if (/\barchitecture\b|\bcomponents?\b|\bstructure\b/.test(lower)) return 'Architecture and Concepts';
+  if ((lower.match(/\bvs\.?\b|\bversus\b|\bdifference\b/g) || []).length >= 2) return 'Comparison';
+  if (/\bintroduction\b|\bwhat is\b|\boverview\b/.test(lower)) return 'Overview';
+  return 'Fundamentals';
+}
+
+/**
+ * Derive a clean 3–8 word cover title from AI-generated markdown.
+ * Priority: H1 → H2 → heading topic analysis → passedTitle (if short) → fallback.
+ */
+function extractTitle(md: string, passedTitle: string): string {
+  // 1. H1 heading — the AI always generates one for structured notes
+  const h1 = md.match(/^#\s+(.+?)$/m);
+  if (h1) {
+    const words = cleanHeading(h1[1]).split(/\s+/).filter(Boolean);
+    if (words.length >= 2) return toTitleCase(words.slice(0, 8).join(' '));
+  }
+
+  // 2. First H2 heading — next most authoritative
+  const h2 = md.match(/^##\s+(.+?)$/m);
+  if (h2) {
+    const words = cleanHeading(h2[1]).split(/\s+/).filter(Boolean);
+    if (words.length >= 2) return toTitleCase(words.slice(0, 8).join(' '));
+  }
+
+  // 3. Derive topic from all headings in the document
+  const headings = [...md.matchAll(/^#{1,3}\s+(.+?)$/gm)].map(m => cleanHeading(m[1]));
+  if (headings.length >= 2) {
+    const topic = dominantTopic(headings);
+    if (topic) return toTitleCase(`${topic} ${contentSuffix(md)}`);
+  }
+
+  // 4. passedTitle only if it looks like a real title (short, no sentence verbs early)
+  if (passedTitle && passedTitle !== 'Study Notes' && passedTitle !== 'Chat Conversation') {
+    const words = passedTitle.trim().split(/\s+/).filter(Boolean);
+    const sentenceVerbs = new Set(['has','have','is','are','was','were','will','would','can','could','should','that','which']);
+    const looksSentence = words.length > 8 || (words.length > 2 && sentenceVerbs.has((words[1] || '').toLowerCase()));
+    if (!looksSentence) return toTitleCase(words.slice(0, 8).join(' '));
+    // passedTitle looks like raw pasted content — extract topic from it
+    const topic = dominantTopic([passedTitle]);
+    if (topic) return toTitleCase(`${topic} ${contentSuffix(md)}`);
+  }
+
+  // 5. Final fallback
+  return 'Study Notes';
 }
 
 // ─── HTML template ────────────────────────────────────────────────────────────
 
-function buildHtml(title: string, intro: string, body: string): string {
+function buildHtml(title: string, body: string): string {
   const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
   return `<!DOCTYPE html>
@@ -231,8 +325,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 .cover-brand svg{width:38px;height:38px}
 .cover-brand-name{font-size:14pt;font-weight:600;letter-spacing:.08em;color:rgba(255,255,255,.75);text-transform:uppercase}
 .cover-title{font-size:28pt;font-weight:700;line-height:1.2;margin-bottom:22px;max-width:540px;letter-spacing:-.01em}
-.cover-divider{width:40px;height:2px;background:linear-gradient(90deg,#5e4eff,#00b4ff);border-radius:2px;margin:0 auto 22px}
-.cover-sub{font-size:11pt;font-weight:400;color:rgba(255,255,255,.55);max-width:460px;line-height:1.7;margin-bottom:52px}
+.cover-divider{width:40px;height:2px;background:linear-gradient(90deg,#5e4eff,#00b4ff);border-radius:2px;margin:0 auto 36px}
 .cover-meta{font-size:8.5pt;color:rgba(255,255,255,.3);letter-spacing:.05em;text-transform:uppercase}
 
 /* ── Content ── */
@@ -349,7 +442,6 @@ del{text-decoration:line-through;color:#888899;opacity:.8}
   </div>
   <div class="cover-title">${esc(title)}</div>
   <div class="cover-divider"></div>
-  <p class="cover-sub">${esc(intro)}</p>
   <p class="cover-meta">Generated ${date} &nbsp;·&nbsp; AI Study Assistant</p>
 </div>
 
@@ -374,8 +466,9 @@ export interface ProPDFOptions {
 }
 
 /** Primary export — returns a complete, print-ready HTML string. */
-export function generatePrintableHTML(markdown: string, title: string): string {
-  return buildHtml(title, extractIntro(markdown), markdownToHtml(markdown));
+export function generatePrintableHTML(markdown: string, passedTitle: string): string {
+  const title = extractTitle(markdown, passedTitle);
+  return buildHtml(title, markdownToHtml(markdown));
 }
 
 /** Backward-compatible class wrapper (route uses this constructor + .generate()). */
@@ -383,12 +476,14 @@ export class ProfessionalPdfGenerator {
   constructor(_opts: Partial<ProPDFOptions> = {}) {}
 
   public generate(opts: ProPDFOptions): ArrayBuffer {
-    const html = generatePrintableHTML(opts.content, opts.title || 'Study Notes');
+    const title = extractTitle(opts.content, opts.title || 'Study Notes');
+    const html  = buildHtml(title, markdownToHtml(opts.content));
     return new TextEncoder().encode(html).buffer;
   }
 
   public generateBlob(opts: ProPDFOptions): Blob {
-    const html = generatePrintableHTML(opts.content, opts.title || 'Study Notes');
+    const title = extractTitle(opts.content, opts.title || 'Study Notes');
+    const html  = buildHtml(title, markdownToHtml(opts.content));
     return new Blob([html], { type: 'text/html; charset=utf-8' });
   }
 }

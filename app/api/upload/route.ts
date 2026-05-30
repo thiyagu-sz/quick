@@ -8,7 +8,7 @@ import { requireAuth } from '@/app/lib/auth/requireAuth';
 // Queue is lazy-loaded so the upload route still works when REDIS_URL is absent.
 // If Redis is available, embedding is offloaded to the background worker.
 // If Redis is absent, embedding runs synchronously in this request (original behavior).
-let uploadQueuePromise: Promise<import('@/worker/queues').uploadQueue['constructor']['prototype'] | null> | null = null;
+let uploadQueuePromise: Promise<import('bullmq').Queue | null> | null = null;
 
 async function getUploadQueue() {
   if (!process.env.REDIS_URL) return null;

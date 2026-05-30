@@ -119,29 +119,20 @@ export default function Sidebar({ user }: SidebarProps) {
 
   const loadChatHistory = async (userId: string) => {
     try {
+      // Query Supabase directly — bypasses the Vercel API route entirely.
+      // This eliminates: serverless cold start (2-5s) + requireAuth network
+      // round-trip (100-300ms) + rate limiter overhead (30-100ms).
+      // The authenticated client is already in memory from getSupabaseClient().
+      // RLS enforces user_id isolation server-side.
       const supabase = getSupabaseClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data, error } = await supabase
+        .from('chat_conversations')
+        .select('id, title, created_at, updated_at')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false })
+        .limit(10);
 
-      // Use limit=10 to share the same Redis cache key as the chat page
-      const response = await fetch('/api/chat/history?limit=10', {
-        headers: {
-          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setChatHistory(data.conversations || []);
-      } else {
-        // API failed — fall back to direct Supabase query
-        const { data: direct } = await supabase
-          .from('chat_conversations')
-          .select('id, title, created_at, updated_at')
-          .eq('user_id', userId)
-          .order('updated_at', { ascending: false })
-          .limit(10);
-        setChatHistory((direct as any) || []);
-      }
+      if (!error) setChatHistory((data as any) || []);
     } catch (error) {
       console.error('Error loading chat history:', error);
       setChatHistory([]);

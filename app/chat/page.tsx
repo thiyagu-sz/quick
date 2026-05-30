@@ -277,22 +277,22 @@ function ChatContent() {
     }
   }, [messages, currentConversationId, saveChat, selectedFormat, wordCount, user?.id, getStorageKey]);
 
-  // Load chat history list - MOVED UP to avoid ReferenceError
+  // Load chat history list — queries Supabase directly, no API route.
+  // Eliminates Vercel cold start + requireAuth latency from the critical path.
   const loadChatHistory = useCallback(async () => {
     try {
       const supabase = getSupabaseClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) return;
 
-      const response = await fetch('/api/chat/history?limit=10', {
-        headers: {
-          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
-        },
-      });
+      const { data, error } = await supabase
+        .from('chat_conversations')
+        .select('id, title, created_at, updated_at')
+        .eq('user_id', currentUser.id)
+        .order('updated_at', { ascending: false })
+        .limit(10);
 
-      if (response.ok) {
-        const data = await response.json();
-        setChatHistory(data.conversations || []);
-      }
+      if (!error) setChatHistory((data as any) || []);
     } catch (error) {
       console.error('Error loading chat history:', error);
     }

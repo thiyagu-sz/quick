@@ -53,3 +53,6 @@ export async function globalRateLimit(userId: string) {
     return { success: true, remaining: 1, resetIn: 0 };
   }
 }
+
+// Shared Redis client for cache operations (chat history, etc.)
+export { redis as upstashRedis };

@@ -122,8 +122,8 @@ export default function Sidebar({ user }: SidebarProps) {
       const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
 
-      // Primary: fetch via API (cached, rate-limited)
-      const response = await fetch('/api/chat/history?limit=3', {
+      // Use limit=10 to share the same Redis cache key as the chat page
+      const response = await fetch('/api/chat/history?limit=10', {
         headers: {
           ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
         },
@@ -131,28 +131,15 @@ export default function Sidebar({ user }: SidebarProps) {
 
       if (response.ok) {
         const data = await response.json();
-        const conversations = data.conversations || [];
-        setChatHistory(conversations);
-
-        // Fallback: if API returned empty but user is authenticated, query Supabase directly
-        // (guards against Redis cache staleness or transient API errors)
-        if (conversations.length === 0 && userId) {
-          const { data: direct } = await supabase
-            .from('chat_conversations')
-            .select('id, title, created_at, updated_at')
-            .eq('user_id', userId)
-            .order('updated_at', { ascending: false })
-            .limit(3);
-          if (direct && direct.length > 0) setChatHistory(direct as any);
-        }
+        setChatHistory(data.conversations || []);
       } else {
-        // API failed — go directly to Supabase
+        // API failed — fall back to direct Supabase query
         const { data: direct } = await supabase
           .from('chat_conversations')
           .select('id, title, created_at, updated_at')
           .eq('user_id', userId)
           .order('updated_at', { ascending: false })
-          .limit(3);
+          .limit(10);
         setChatHistory((direct as any) || []);
       }
     } catch (error) {
@@ -161,29 +148,30 @@ export default function Sidebar({ user }: SidebarProps) {
     }
   };
 
+  // Auth subscription — mounted ONCE, never re-created on navigation.
+  // Moving pathname out of the dep array eliminates the double-fetch and
+  // subscription churn that caused 2–3 redundant history calls per navigation.
   useEffect(() => {
     const supabase = getSupabaseClient();
-    
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Clear history immediately on auth change to prevent cross-user leakage
-      if (event === 'SIGNED_OUT' || event === 'USER_UPDATED' || event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+      if (event === 'SIGNED_OUT') {
         setChatHistory([]);
         setUserEmail('');
-        
-        // Force a UI refresh for chat list if on the chat page
-        if (pathname === '/chat') {
-          window.dispatchEvent(new CustomEvent('authChangeClear'));
-        }
-      }
-
-      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        window.dispatchEvent(new CustomEvent('authChangeClear'));
+      } else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
         if (session?.user) {
           setUserEmail(session.user.email || '');
           loadChatHistory(session.user.id);
         }
+      } else if (event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+        // Token refresh — update email only, keep history intact
+        if (session?.user) setUserEmail(session.user.email || '');
       }
     });
 
+    // One-time fetch on mount — the auth subscription above handles
+    // subsequent loads, so fetchUser just covers the cold-start case.
     const fetchUser = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
@@ -193,31 +181,26 @@ export default function Sidebar({ user }: SidebarProps) {
     };
     fetchUser();
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [pathname]);
+    return () => { subscription.unsubscribe(); };
+  }, []); // ← empty deps: subscribe once, never re-create on navigation
 
-  // Sync with global chat events
+  // Sync with global chat events (new conversation saved, deleted)
   useEffect(() => {
     const handleSync = async () => {
       const supabase = getSupabaseClient();
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser) {
-        await loadChatHistory(currentUser.id);
-      }
+      if (currentUser) await loadChatHistory(currentUser.id);
     };
 
     window.addEventListener('chatSaved', handleSync);
     window.addEventListener('chatDeleted' as any, handleSync);
-    
     return () => {
       window.removeEventListener('chatSaved', handleSync);
       window.removeEventListener('chatDeleted' as any, handleSync);
     };
   }, []);
 
-  // Close mobile menu when route changes
+  // Close mobile menu when route changes (separate, lightweight effect)
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [pathname]);

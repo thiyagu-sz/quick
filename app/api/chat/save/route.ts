@@ -105,12 +105,15 @@ export async function POST(request: NextRequest) {
         .update({ updated_at: new Date().toISOString() })
         .eq('id', conversationId);
 
-      // Get existing messages to avoid duplicates
+      // Fetch only the most recent 20 messages for dedup — the incoming
+      // payload is at most 1–2 messages, so comparing against the tail
+      // of the conversation is sufficient and avoids a full-table transfer.
       const { data: existingMessages } = await supabase
         .from('chat_messages')
-        .select('id, role, content')
+        .select('role, content')
         .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       // Find new messages (not already in database)
       const newMessages = messages.filter((msg: { role: string; content: string }) => {

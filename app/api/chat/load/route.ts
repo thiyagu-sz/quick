@@ -16,32 +16,31 @@ export async function GET(request: NextRequest) {
       throw new AppError('Conversation ID is required', 400, 'BAD_REQUEST');
     }
 
-    // Get conversation
-    const { data: conversation, error: convError } = await supabase
-      .from('chat_conversations')
-      .select('id, title, created_at')
-      .eq('id', conversationId)
-      .eq('user_id', user.id)
-      .single();
+    // Run both queries in parallel — halves latency vs sequential fetches
+    const [convResult, msgResult] = await Promise.all([
+      supabase
+        .from('chat_conversations')
+        .select('id, title, created_at')
+        .eq('id', conversationId)
+        .eq('user_id', user.id)
+        .single(),
+      supabase
+        .from('chat_messages')
+        .select('id, role, content, sources, created_at')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true }),
+    ]);
 
-    if (convError || !conversation) {
+    if (convResult.error || !convResult.data) {
       throw new AppError('Conversation not found', 404, 'NOT_FOUND');
     }
-
-    // Get messages
-    const { data: messages, error: messagesError } = await supabase
-      .from('chat_messages')
-      .select('id, role, content, sources, created_at')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
-
-    if (messagesError) {
-      throw new AppError('Failed to load messages', 500, 'DB_ERROR', messagesError);
+    if (msgResult.error) {
+      throw new AppError('Failed to load messages', 500, 'DB_ERROR', msgResult.error);
     }
 
     return NextResponse.json({
-      conversation,
-      messages: messages || [],
+      conversation: convResult.data,
+      messages: msgResult.data || [],
     });
   } catch (error) {
     return ErrorHandler.handle(error, 'GET /api/chat/load');

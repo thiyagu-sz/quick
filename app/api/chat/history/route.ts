@@ -8,14 +8,18 @@ import { upstashRedis } from '@/app/lib/rateLimiter.redis';
 export const maxDuration = 15;
 export const runtime = 'nodejs';
 
-// Reduced from 30s: cache invalidation is now reliable (P1.4 fix), so 10s gives
-// fresh data without hammering Supabase on every request.
-const HISTORY_CACHE_TTL_SECONDS = 10;
+// 60s TTL: cache is invalidated on every save/delete anyway, so a longer TTL
+// purely improves hit rate during a session without serving stale data.
+// At 10s the cache was expiring faster than a normal reading pace, causing
+// a DB hit on every navigation after any pause.
+const HISTORY_CACHE_TTL_SECONDS = 60;
 
 const CONFIG = {
   TIMEOUTS: {
-    DATABASE_TIMEOUT: 10000,
-    REQUEST_TIMEOUT: 15000,
+    // 3s DB timeout: if Postgres takes longer than this, the index is missing.
+    // Fail fast and return 503 rather than blocking the user for 10 seconds.
+    DATABASE_TIMEOUT: 3000,
+    REQUEST_TIMEOUT: 8000,
   },
   LIMITS: {
     MIN_LIMIT: 1,

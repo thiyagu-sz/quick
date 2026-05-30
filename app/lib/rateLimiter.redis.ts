@@ -19,11 +19,12 @@ const redis = process.env.UPSTASH_REDIS_REST_URL
     })
   : null;
 
-// Sliding window: 15 requests per 1 minute
+// UNIFIED: Sliding window: 20 requests per 1 minute per user
+// This is the ONLY rate limiter. Middleware no longer has duplicate limiting.
 const ratelimit = redis 
   ? new Ratelimit({
       redis: redis,
-      limiter: Ratelimit.slidingWindow(15, '1 m'),
+      limiter: Ratelimit.slidingWindow(20, '1 m'),  // ✅ UNIFIED LIMIT
       analytics: true,
       prefix: 'quicknotes:ratelimit',
     })
@@ -31,11 +32,13 @@ const ratelimit = redis
 
 /**
  * Global rate limiter with Redis fallback
+ * This is the ONLY rate limiting mechanism in the system.
+ * Middleware.ts no longer duplicates this logic.
  */
 export async function globalRateLimit(userId: string) {
   if (!ratelimit) {
-    // Falls back to in-memory if Redis not configured
-    return { success: true, remaining: 15, resetIn: 0 };
+    // Falls back to unrestricted if Redis not configured (development mode)
+    return { success: true, remaining: 20, resetIn: 0 };
   }
 
   try {
@@ -49,7 +52,11 @@ export async function globalRateLimit(userId: string) {
 
     return { success, remaining, resetIn };
   } catch (error) {
-    console.error('[RateLimit] Redis error, bypassing...', error);
+    console.error('[RateLimit] Redis error, bypassing to avoid blocking users...', error);
+    // On Redis error, allow request (fail-open for availability)
     return { success: true, remaining: 1, resetIn: 0 };
   }
 }
+
+// Reusable Upstash Redis client for caching (null when not configured)
+export { redis as upstashRedis };

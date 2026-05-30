@@ -150,23 +150,26 @@ export default function Sidebar({ user }: SidebarProps) {
     const supabase = getSupabaseClient();
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Clear history immediately on auth change to prevent cross-user leakage
-      if (event === 'SIGNED_OUT' || event === 'USER_UPDATED' || event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+      if (event === 'SIGNED_OUT') {
+        // Actual sign-out: clear everything and notify the chat page
         setChatHistory([]);
         setUserEmail('');
-        
-        // Force a UI refresh for chat list if on the chat page
         if (pathname === '/chat') {
           window.dispatchEvent(new CustomEvent('authChangeClear'));
         }
-      }
-
-      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+      } else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
         if (session?.user) {
           setUserEmail(session.user.email || '');
           loadChatHistory(session.user.id);
         }
+      } else if (event === 'USER_UPDATED') {
+        // Silent JWT refresh (~every 1h) — only update email, never clear history.
+        // Clearing history here caused the sidebar to flash empty every hour.
+        if (session?.user?.email) {
+          setUserEmail(session.user.email);
+        }
       }
+      // PASSWORD_RECOVERY: no sidebar state changes needed
     });
 
     const fetchUser = async () => {

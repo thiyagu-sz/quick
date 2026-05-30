@@ -13,7 +13,6 @@ import {
   FileDown,
 } from 'lucide-react';
 import Link from 'next/link';
-import { generateProfessionalHTML } from '@/app/lib/pdfGenerator';
 
 interface Collection {
   id: string;
@@ -73,38 +72,58 @@ export default function NotesViewerPage() {
     checkAuth();
   }, [router, collectionId]);
 
-  // Auto-refresh/poll for notes if they don't exist yet
+  // Watch for notes/document_collections changes via Supabase Realtime.
+  // Replaces the previous setInterval polling (was 40 × 3s = 120 DB queries per user).
+  // Realtime pushes a single event when any document_collections row changes,
+  // which is far cheaper at scale than constant polling.
   useEffect(() => {
-    if (!note && collection && !loading && collectionId) {
-      // Start polling every 3 seconds if notes don't exist
-      setIsPolling(true);
-      let pollCount = 0;
-      const maxPolls = 40; // 2 minutes (40 * 3 seconds)
-      
-      const pollInterval = setInterval(async () => {
-        pollCount++;
-        console.log(`Polling for notes... (attempt ${pollCount}/${maxPolls})`);
-        try {
-          await fetchCollectionData();
-        } catch (error) {
-          console.error('Error during polling:', error);
-        }
-        
-        // Stop if we've polled too many times
-        if (pollCount >= maxPolls) {
-          clearInterval(pollInterval);
-          setIsPolling(false);
-          console.log('Stopped polling after maximum attempts');
-        }
-      }, 3000); // Check every 3 seconds
+    if (note || !collection || loading || !collectionId) return;
 
-      return () => {
-        clearInterval(pollInterval);
-      };
-    } else if (note) {
-      // Stop polling once notes are found
+    setIsPolling(true);
+
+    const supabase = getSupabaseClient();
+
+    // Subscribe to any INSERT/UPDATE on document_collections for this collection
+    const channel = supabase
+      .channel(`notes-ready-${collectionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'document_collections',
+          filter: `collection_id=eq.${collectionId}`,
+        },
+        () => {
+          // A document changed status — re-fetch to see if notes are ready
+          fetchCollectionData().catch(console.error);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notes',
+          filter: `collection_id=eq.${collectionId}`,
+        },
+        () => {
+          // Notes row appeared — fetch immediately
+          fetchCollectionData().catch(console.error);
+        }
+      )
+      .subscribe();
+
+    // Safety-net: one poll at 30s in case Realtime is not enabled on this project
+    const fallbackTimeout = setTimeout(async () => {
+      try { await fetchCollectionData(); } catch { /* ignore */ }
+    }, 30000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearTimeout(fallbackTimeout);
       setIsPolling(false);
-    }
+    };
   }, [note, collection, loading, collectionId]);
 
   const fetchCollectionData = async () => {
@@ -233,56 +252,61 @@ export default function NotesViewerPage() {
     const cleanTitle = title.replace(/[^a-z0-9]/gi, '_');
 
     try {
-      const htmlDocument = generateProfessionalHTML(note.content, title);
-      
+      const supabase = getSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+
       const response = await fetch('/api/chat/pdf', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
         },
-        body: JSON.stringify({
-          html: htmlDocument,
-          filename: `${cleanTitle}.pdf`,
-        }),
+        body: JSON.stringify({ markdown: note.content, title }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Document generation failed: ${response.statusText} - ${errorData.error || ''}`);
+        throw new Error(`PDF generation failed: ${errorData.error || response.statusText}`);
       }
 
-      // Verify we have a valid response
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/pdf')) {
-        throw new Error('Invalid response type: expected PDF, got ' + contentType);
+      const contentType = response.headers.get('content-type') || '';
+
+      if (contentType.includes('text/html')) {
+        // Open the print-preview page in a new window — same flow as chat page
+        const html = await response.text();
+        const printWindow = window.open('', '_blank', 'width=960,height=780,noopener');
+        if (printWindow) {
+          printWindow.document.open();
+          printWindow.document.write(html);
+          printWindow.document.close();
+          setStatusModal({
+            show: true,
+            type: 'success',
+            title: 'PDF Preview Ready',
+            message: 'Click "Save as PDF" in the preview toolbar to download.',
+          });
+        } else {
+          // Popup blocked — download HTML file as fallback
+          const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${cleanTitle}.html`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          setStatusModal({
+            show: true,
+            type: 'info',
+            title: 'Preview Blocked',
+            message: 'HTML file downloaded. Open it in your browser and print to save as PDF.',
+          });
+        }
+        return;
       }
 
-      const blob = await response.blob();
-      
-      // Verify blob is not empty and is valid PDF
-      if (blob.size === 0) {
-        throw new Error('PDF generation returned empty blob');
-      }
-
-      if (!blob.type.includes('pdf') && blob.type !== 'application/octet-stream') {
-        console.warn('Unexpected blob type:', blob.type);
-      }
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${cleanTitle}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      setStatusModal({
-        show: true,
-        type: 'success',
-        title: 'Export Successful',
-        message: `PDF exported as ${cleanTitle}.pdf`,
-      });
+      throw new Error('Unexpected response from PDF service.');
     } catch (error) {
       console.error('Export error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

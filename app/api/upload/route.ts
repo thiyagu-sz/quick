@@ -5,6 +5,21 @@ import { CONFIG } from '@/app/lib/config';
 import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
 
+// Queue is lazy-loaded so the upload route still works when REDIS_URL is absent.
+// If Redis is available, embedding is offloaded to the background worker.
+// If Redis is absent, embedding runs synchronously in this request (original behavior).
+let uploadQueuePromise: Promise<import('@/worker/queues').uploadQueue['constructor']['prototype'] | null> | null = null;
+
+async function getUploadQueue() {
+  if (!process.env.REDIS_URL) return null;
+  if (!uploadQueuePromise) {
+    uploadQueuePromise = import('@/worker/queues')
+      .then(m => m.uploadQueue)
+      .catch(() => null);
+  }
+  return uploadQueuePromise;
+}
+
 export const maxDuration = 60;
 export const runtime = "nodejs";
 
@@ -15,6 +30,18 @@ const ALLOWED_TYPES = [
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ];
+
+// 45s cap on PDF parsing — leaves ~15s for embedding before Vercel's 60s maxDuration
+const PDF_PARSE_TIMEOUT_MS = 45000;
+
+// Race a promise against a timeout so corrupted PDFs don't hang the serverless slot
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let id: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    id = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(id));
+}
 
 interface Chunk {
   content: string;
@@ -116,7 +143,7 @@ async function extractTextFromFile(file: File): Promise<string> {
           verbosity: 0, // Suppress warnings
         });
         
-        const pdfDocument = await loadingTask.promise;
+        const pdfDocument = await withTimeout(loadingTask.promise, PDF_PARSE_TIMEOUT_MS, 'pdfjs');
         const numPages = pdfDocument.numPages;
         
         console.log(`PDF loaded: ${numPages} pages`);
@@ -152,30 +179,31 @@ async function extractTextFromFile(file: File): Promise<string> {
           const require = createRequire(import.meta.url);
           const PDFParser = require('pdf2json');
           
-          return new Promise((resolve, reject) => {
-            const pdfParser = new PDFParser(null, 1);
-            
-            pdfParser.on('pdfParser_dataError', (errData: any) => {
-              console.error('pdf2json parse error:', errData);
-              reject(new Error(`PDF parsing error: ${errData.parserError}`));
-            });
-            
-            pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
-              try {
-                // Extract text from all pages
-                let fullText = '';
-                if (pdfData.Pages && pdfData.Pages.length > 0) {
-                  for (const page of pdfData.Pages) {
-                    if (page.Texts && page.Texts.length > 0) {
-                      for (const textItem of page.Texts) {
-                        if (textItem.R && textItem.R.length > 0) {
-                          for (const run of textItem.R) {
-                            if (run.T) {
-                              // Decode URI component if needed
-                              try {
-                                fullText += decodeURIComponent(run.T) + ' ';
-                              } catch {
-                                fullText += run.T + ' ';
+          return await withTimeout(
+            new Promise<string>((resolve, reject) => {
+              const pdfParser = new PDFParser(null, 1);
+
+              pdfParser.on('pdfParser_dataError', (errData: any) => {
+                console.error('pdf2json parse error:', errData);
+                reject(new Error(`PDF parsing error: ${errData.parserError}`));
+              });
+
+              pdfParser.on('pdfParser_dataReady', (pdfData: any) => {
+                try {
+                  // Extract text from all pages
+                  let fullText = '';
+                  if (pdfData.Pages && pdfData.Pages.length > 0) {
+                    for (const page of pdfData.Pages) {
+                      if (page.Texts && page.Texts.length > 0) {
+                        for (const textItem of page.Texts) {
+                          if (textItem.R && textItem.R.length > 0) {
+                            for (const run of textItem.R) {
+                              if (run.T) {
+                                try {
+                                  fullText += decodeURIComponent(run.T) + ' ';
+                                } catch {
+                                  fullText += run.T + ' ';
+                                }
                               }
                             }
                           }
@@ -183,22 +211,24 @@ async function extractTextFromFile(file: File): Promise<string> {
                       }
                     }
                   }
+
+                  if (!fullText || fullText.trim().length === 0) {
+                    reject(new Error('PDF appears to be empty or contains no extractable text'));
+                  } else {
+                    console.log(`Extracted ${fullText.length} characters using pdf2json`);
+                    resolve(fullText.trim());
+                  }
+                } catch (extractError) {
+                  reject(extractError);
                 }
-                
-                if (!fullText || fullText.trim().length === 0) {
-                  reject(new Error('PDF appears to be empty or contains no extractable text'));
-                } else {
-                  console.log(`Extracted ${fullText.length} characters using pdf2json`);
-                  resolve(fullText.trim());
-                }
-              } catch (extractError) {
-                reject(extractError);
-              }
-            });
-            
-            // Parse the buffer
-            pdfParser.parseBuffer(Buffer.from(buffer));
-          });
+              });
+
+              // Parse the buffer
+              pdfParser.parseBuffer(Buffer.from(buffer));
+            }),
+            PDF_PARSE_TIMEOUT_MS,
+            'pdf2json'
+          );
         } catch (pdf2jsonError) {
           console.error('pdf2json also failed:', pdf2jsonError);
           
@@ -214,35 +244,37 @@ async function extractTextFromFile(file: File): Promise<string> {
               // PDFParse is a class - we need to check if it can be called or needs instantiation
               // Some versions export it as a callable class
               try {
-                const result = await new Promise((resolve, reject) => {
-                  // Try calling as constructor with callback
-                  const parser = new pdfParseLib.PDFParse(Buffer.from(buffer), (err: any, data: any) => {
-                    if (err) reject(err);
-                    else resolve(data);
-                  });
-                  
-                  // If no callback pattern, try direct instantiation
-                  if (!parser || typeof parser !== 'object') {
-                    // Try synchronous approach
-                    try {
-                      const directResult = new pdfParseLib.PDFParse(Buffer.from(buffer));
-                      if (directResult && directResult.text) {
-                        resolve(directResult);
-                      } else {
-                        // Wait a bit and check again
-                        setTimeout(() => {
-                          if (directResult && directResult.text) {
-                            resolve(directResult);
-                          } else {
-                            reject(new Error('PDFParse did not return text'));
-                          }
-                        }, 100);
+                const result = await withTimeout(
+                  new Promise((resolve, reject) => {
+                    // Try calling as constructor with callback
+                    const parser = new pdfParseLib.PDFParse(Buffer.from(buffer), (err: any, data: any) => {
+                      if (err) reject(err);
+                      else resolve(data);
+                    });
+
+                    // If no callback pattern, try direct instantiation
+                    if (!parser || typeof parser !== 'object') {
+                      try {
+                        const directResult = new pdfParseLib.PDFParse(Buffer.from(buffer));
+                        if (directResult && directResult.text) {
+                          resolve(directResult);
+                        } else {
+                          setTimeout(() => {
+                            if (directResult && directResult.text) {
+                              resolve(directResult);
+                            } else {
+                              reject(new Error('PDFParse did not return text'));
+                            }
+                          }, 100);
+                        }
+                      } catch (syncError) {
+                        reject(syncError);
                       }
-                    } catch (syncError) {
-                      reject(syncError);
                     }
-                  }
-                });
+                  }),
+                  PDF_PARSE_TIMEOUT_MS,
+                  'pdf-parse-class'
+                );
                 
                 const text = (result as any)?.text || '';
                 if (text && text.trim().length > 0) {
@@ -256,7 +288,11 @@ async function extractTextFromFile(file: File): Promise<string> {
             // Last resort: try default export
             const pdfParseFn = pdfParseLib.default || pdfParseLib;
             if (typeof pdfParseFn === 'function') {
-              const data = await pdfParseFn(Buffer.from(buffer));
+              const data = await withTimeout(
+                pdfParseFn(Buffer.from(buffer)),
+                PDF_PARSE_TIMEOUT_MS,
+                'pdf-parse-fn'
+              );
               const text = data?.text || '';
               if (text && text.trim().length > 0) {
                 return text;
@@ -520,7 +556,8 @@ export async function POST(request: NextRequest) {
     const collectionName = formData.get('collectionName') as string;
     const files = formData.getAll('files') as File[];
     const outputType = (formData.get('outputType') as FormatType) || 'key-points';
-    const wordCount = parseInt(formData.get('wordCount') as string) || 100;
+    const rawWordCount = parseInt(formData.get('wordCount') as string) || 100;
+    const wordCount = Math.min(Math.max(rawWordCount, 50), 500);
 
     if (!collectionName || !collectionName.trim()) {
       return NextResponse.json({ error: 'Collection name is required' }, { status: 400 });
@@ -618,6 +655,56 @@ export async function POST(request: NextRequest) {
             name: documentData.file_name,
             status: 'pending',
           });
+
+          // Embedding: enqueue to background worker if Redis is available,
+          // otherwise fall back to inline processing (original behaviour).
+          try {
+            const queue = await getUploadQueue();
+
+            if (queue) {
+              // Background path — upload route returns immediately; worker handles embeddings
+              await queue.add('embed-document', {
+                documentId: documentData.id,
+                collectionId: collectionData.id,
+                userId: user.id,
+                storagePath: '',
+                fileName: file.name,
+                fileType: file.type,
+                outputType: 'key-points',
+                wordCount: 100,
+              });
+              console.log(`📬 Queued embedding job for ${file.name}`);
+            } else {
+              // Synchronous fallback — no Redis configured
+              console.log(`🔄 Generating embeddings inline for ${file.name}...`);
+              const chunks = chunkText(extractedText, 1000, 200);
+              const BATCH_SIZE = 10;
+
+              for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+                const batch = chunks.slice(i, i + BATCH_SIZE);
+                const embeddings = await Promise.all(
+                  batch.map(c => AiService.generateEmbedding(c.content))
+                );
+                const records = batch.map((chunk, idx) => ({
+                  collection_id: collectionData.id,
+                  document_id: documentData.id,
+                  user_id: user.id,
+                  content: chunk.content,
+                  chunk_index: i + idx,
+                  embedding: embeddings[idx],
+                }));
+                const { error: insertError } = await supabase
+                  .from('document_chunks')
+                  .insert(records);
+                if (insertError) {
+                  console.error(`❌ Failed to insert chunks for ${file.name}:`, insertError);
+                }
+              }
+              console.log(`✅ Inline embeddings done for ${file.name}`);
+            }
+          } catch (embeddingError) {
+            console.error(`⚠️ Embedding error for ${file.name}:`, embeddingError);
+          }
         }
       } catch (error) {
         console.error(`Error processing file ${file.name}:`, error);

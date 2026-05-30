@@ -1,5 +1,18 @@
 import { jsPDF } from 'jspdf';
 
+/** Strip all inline markdown markers so jsPDF renders plain text. */
+function strip(text: string): string {
+  return text
+    .replace(/\*\*\*(.+?)\*\*\*/g, '$1')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/\*([^*\n]+?)\*/g, '$1')
+    .replace(/_([^_\n]+?)_/g, '$1')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^\)]*\)/g, '$1');
+}
+
 export interface PDFGeneratorOptions {
   title: string;
   content: string;
@@ -219,7 +232,7 @@ export class ClientPDFGenerator {
       if (trimmed.startsWith('# ')) {
         this.ensureHeadingSpace(25);
         this.currentY += 5;
-        this.addWrappedText(trimmed.slice(2), 20, true, this.brandColor);
+        this.addWrappedText(strip(trimmed.slice(2)), 20, true, this.brandColor);
         this.currentY += 8;
         continue;
       }
@@ -227,8 +240,7 @@ export class ClientPDFGenerator {
       if (trimmed.startsWith('## ')) {
         this.ensureHeadingSpace(20);
         this.currentY += 3;
-        this.addWrappedText(trimmed.slice(3), 16, true);
-        // Underline
+        this.addWrappedText(strip(trimmed.slice(3)), 16, true);
         this.doc.setDrawColor(...this.brandColor);
         this.doc.setLineWidth(0.5);
         this.doc.line(this.margin, this.currentY + 2, this.pageWidth - this.margin, this.currentY + 2);
@@ -239,7 +251,7 @@ export class ClientPDFGenerator {
       if (trimmed.startsWith('### ')) {
         this.ensureHeadingSpace(15);
         this.currentY += 2;
-        this.addWrappedText(trimmed.slice(4), 13, true, [50, 50, 60]);
+        this.addWrappedText(strip(trimmed.slice(4)), 13, true, [50, 50, 60]);
         this.currentY += 4;
         continue;
       }
@@ -248,14 +260,14 @@ export class ClientPDFGenerator {
       if (trimmed.match(/^Q\d+\./)) {
         this.ensureHeadingSpace(18);
         this.currentY += 3;
-        this.addWrappedText(trimmed, 12, true);
+        this.addWrappedText(strip(trimmed), 12, true);
         this.currentY += 3;
         continue;
       }
 
       if (trimmed.match(/^[A-D]\./) && !trimmed.startsWith('A]')) {
         this.checkPageBreak(this.lineHeight + 2);
-        this.addWrappedText(`  ${trimmed}`, 11, false, [50, 50, 60]);
+        this.addWrappedText(`  ${strip(trimmed)}`, 11, false, [50, 50, 60]);
         this.currentY += 2;
         continue;
       }
@@ -264,14 +276,14 @@ export class ClientPDFGenerator {
         this.checkPageBreak(this.lineHeight + 4);
         this.doc.setFillColor(220, 252, 231);
         this.doc.rect(this.margin, this.currentY - 2, this.contentWidth, this.lineHeight + 4, 'F');
-        this.addWrappedText(trimmed, 11, true, [22, 163, 74]);
+        this.addWrappedText(strip(trimmed), 11, true, [22, 163, 74]);
         this.currentY += 3;
         continue;
       }
 
       if (trimmed.startsWith('Explanation:')) {
         this.checkPageBreak(this.lineHeight + 2);
-        this.addWrappedText(trimmed, 10, false, [100, 100, 110]);
+        this.addWrappedText(strip(trimmed), 10, false, [100, 100, 110]);
         this.currentY += 3;
         continue;
       }
@@ -279,12 +291,8 @@ export class ClientPDFGenerator {
       // Handle lists
       if (trimmed.match(/^[-•*]\s/)) {
         this.checkPageBreak(this.lineHeight + 2);
-        if (!inList) {
-          inList = true;
-          this.currentY += 2;
-        }
-        const listText = trimmed.replace(/^[-•*]\s/, '');
-        this.addWrappedText(`• ${listText}`, 11, false, [50, 50, 60]);
+        if (!inList) { inList = true; this.currentY += 2; }
+        this.addWrappedText(`• ${strip(trimmed.replace(/^[-•*]\s/, ''))}`, 11, false, [50, 50, 60]);
         this.currentY += 2;
         continue;
       }
@@ -297,24 +305,16 @@ export class ClientPDFGenerator {
         this.doc.setDrawColor(...this.brandColor);
         this.doc.setLineWidth(1);
         this.doc.line(this.margin, this.currentY - 2, this.margin, this.currentY + this.lineHeight + 2);
-        this.addWrappedText(`  ${trimmed.slice(2)}`, 10, false, [75, 85, 99]);
+        this.addWrappedText(`  ${strip(trimmed.slice(2))}`, 10, false, [75, 85, 99]);
         this.currentY += 3;
         continue;
       }
 
       // Regular paragraph
-      if (inList) {
-        inList = false;
-        this.currentY += 3;
-      }
-
+      if (inList) { inList = false; this.currentY += 3; }
       this.checkPageBreak(this.lineHeight + 2);
-      let displayText = trimmed;
-      const isBold = trimmed.includes('**');
-      if (isBold) {
-        displayText = trimmed.replace(/\*\*(.*?)\*\*/g, '$1');
-      }
-      this.addWrappedText(displayText, this.defaultFontSize, isBold, [50, 50, 60]);
+      const hasBold = trimmed.includes('**') || trimmed.includes('__');
+      this.addWrappedText(strip(trimmed), this.defaultFontSize, hasBold, [50, 50, 60]);
       this.currentY += 3;
     }
   }

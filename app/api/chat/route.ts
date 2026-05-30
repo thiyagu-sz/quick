@@ -1,9 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { AiService } from '@/app/lib/ai/aiService';
 import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
 import { globalRateLimit } from '@/app/lib/rateLimiter.redis';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
+
+// 120s: DeepSeek R1 reasoning (30–90s) + token generation. Must be on Pro plan.
+export const maxDuration = 120;
+export const runtime = 'nodejs';
 
 // Configuration
 const MAX_CONTEXT_CHUNKS = 5;
@@ -60,8 +64,16 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Parse Request
+    const contentLength = parseInt(request.headers.get('content-length') || '0', 10);
+    if (contentLength > 1_000_000) {
+      throw new AppError('Request body too large (max 1 MB)', 413, 'PAYLOAD_TOO_LARGE');
+    }
+
     const { question, prompt: instructionPrompt, conversationId, title } = await request.json();
     if (!question) throw new AppError('Question is required', 400, 'BAD_REQUEST');
+    if (typeof question === 'string' && question.length > 50_000) {
+      throw new AppError('Question too long (max 50,000 characters)', 400, 'BAD_REQUEST');
+    }
 
     // 4. Conversation Management (Idempotent)
     let activeConversationId = conversationId;
@@ -131,36 +143,69 @@ Rules:
     // 7. AI Call & Stream Spying
     const messages = [{ role: 'user', content: finalPrompt }];
     ErrorHandler.debug('LLM Call Start', { conversationId: activeConversationId });
-    const stream = await AiService.streamChat(messages);
+    const stream = await AiService.streamChat(messages, {}, { userId: user.id, feature: 'chat', conversationId: activeConversationId });
 
     // Create a spying stream to capture assistant content
     let assistantContent = '';
+    let accumulatedSize = 0;
+    const MAX_RESPONSE_SIZE_MB = 10;
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
+    // Heartbeat keeps the SSE connection alive through proxy idle timeouts (Cloudflare, Vercel edge).
+    // Without this, models with long reasoning phases (deepseek-r1) trigger a 30s proxy timeout
+    // before the first token arrives, silently dropping the stream.
+    let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
     const transformStream = new TransformStream({
+      start(controller) {
+        heartbeatInterval = setInterval(() => {
+          try {
+            // SSE comment lines (starting with ':') are ignored by browsers but reset proxy timers
+            controller.enqueue(encoder.encode(': heartbeat\n\n'));
+          } catch {
+            // Stream already closed — interval will be cleared in flush/cancel
+          }
+        }, 15000);
+      },
       transform(chunk, controller) {
         const text = decoder.decode(chunk);
         // data: {"content":"..."}\n\n
+        accumulatedSize += chunk.byteLength;
+
+        // Check buffer size to prevent OOM
+        if (accumulatedSize > MAX_RESPONSE_SIZE_MB * 1024 * 1024) {
+          ErrorHandler.log(
+            new AppError(`Response exceeded max buffer size (>${MAX_RESPONSE_SIZE_MB}MB)`, 413, 'RESPONSE_TOO_LARGE'),
+            'Streaming buffer limit'
+          );
+          controller.error(new Error(`Response too large (>${MAX_RESPONSE_SIZE_MB}MB)`));
+          return;
+        }
+
         const lines = text.split('\n');
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
               if (data.content) assistantContent += data.content;
-            } catch (e) {}
+            } catch (e) {
+              ErrorHandler.debug('SSE parse error', { line: line.substring(0, 100) });
+            }
           }
         }
         controller.enqueue(chunk);
       },
       async flush(controller) {
+        if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+
         // Save assistant message AFTER streaming completes
         if (assistantContent) {
-          ErrorHandler.debug('LLM Call End', { 
-            conversationId: activeConversationId, 
-            contentLength: assistantContent.length 
+          ErrorHandler.debug('LLM Call End', {
+            conversationId: activeConversationId,
+            contentLength: assistantContent.length
           });
-          
+
           const { error: insertError } = await supabase.from('chat_messages').insert({
             conversation_id: activeConversationId,
             user_id: user.id,
@@ -180,8 +225,16 @@ Rules:
         controller.enqueue(encoder.encode(endData));
         // SSE [DONE] sentinel so frontend knows stream ended cleanly
         controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      }
+      },
     });
+
+    // Clear the heartbeat interval if the client disconnects before flush() runs.
+    // request.signal fires on tab close / navigation away, preventing a zombie
+    // interval from running for the remaining maxDuration of the function.
+    request.signal.addEventListener('abort', () => {
+      if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+      ErrorHandler.debug('Client disconnected — heartbeat cleared', { conversationId: activeConversationId });
+    }, { once: true });
 
     return new Response(stream.pipeThrough(transformStream), {
       headers: {
@@ -192,7 +245,15 @@ Rules:
       },
     });
 
-  } catch (error) {
+  } catch (error: any) {
+    // DEBUG: Log the actual error details
+    console.error('[CHAT ROUTE RAW ERROR]', {
+      status: error?.status,
+      statusCode: error?.statusCode,
+      message: error?.message,
+      name: error?.name,
+      code: error?.code,
+    });
     return ErrorHandler.handle(error, 'POST /api/chat');
   }
 }

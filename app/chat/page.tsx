@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getSupabaseClient } from '@/app/lib/supabase';
 import Sidebar from '@/app/components/Sidebar';
@@ -50,6 +50,142 @@ function sanitizeAIError(message: string): string {
   return "Something went wrong. Please try again.";
 }
 
+// ---------------------------------------------------------------------------
+// MessageCard — memoized to prevent re-renders of stable messages during
+// streaming. The custom comparator ignores callback reference changes and
+// only re-renders when actual content or UI state changes, cutting re-renders
+// from O(N messages × tokens) to O(tokens) for all but the streaming message.
+// ---------------------------------------------------------------------------
+
+interface MessageCardProps {
+  message: Message;
+  isLastAssistantMessage: boolean;
+  userInitial: string;
+  isExporting: boolean;
+  isCopying: boolean;
+  onExport: (format: 'pdf' | 'doc', content: string) => void;
+  onCopy: (content: string) => void;
+}
+
+const MessageCard = React.memo(
+  function MessageCard({
+    message,
+    isLastAssistantMessage,
+    userInitial,
+    isExporting,
+    isCopying,
+    onExport,
+    onCopy,
+  }: MessageCardProps) {
+    return (
+      <div className={`w-full py-3 sm:py-4 ${
+        message.role === 'user' ? 'bg-white' : 'bg-gray-50'
+      } border-b border-gray-100 last:border-b-0`}>
+        <div className="max-w-4xl mx-auto px-3 sm:px-4 lg:px-6">
+          <div className="flex gap-3 sm:gap-4">
+            <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+              message.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-white'
+            }`}>
+              {message.role === 'user' ? (
+                <span className="text-xs font-medium">{userInitial}</span>
+              ) : (
+                <span className="text-xs">AI</span>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-gray-900 leading-relaxed">
+                {message.role === 'assistant' ? renderMarkdown(message.content) : (
+                  <div className="whitespace-pre-wrap text-left">{message.content}</div>
+                )}
+              </div>
+              {message.sources && message.sources.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-200">
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-gray-600">Sources</p>
+                  <div className="flex flex-wrap gap-2">
+                    {message.sources.map((source, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-gray-100 text-gray-700"
+                      >
+                        {source.name}
+                        {source.page && <span className="text-gray-500">p. {source.page}</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {isLastAssistantMessage && message.content && message.content.trim().length > 0 && (
+                <div className="mt-4 pt-3 border-t border-gray-200 flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onExport('pdf', message.content)}
+                    disabled={isExporting}
+                    className={`inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors min-h-[32px] ${
+                      isExporting
+                        ? 'text-gray-400 cursor-not-allowed bg-gray-100'
+                        : 'text-gray-700 hover:text-gray-900 hover:bg-gray-200 cursor-pointer'
+                    }`}
+                  >
+                    {isExporting ? (
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" />Exporting...</>
+                    ) : (
+                      <><FileText className="w-3.5 h-3.5" />Export PDF</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCopy(message.content)}
+                    disabled={isCopying || !message.content || message.content.trim().length === 0}
+                    className={`inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors min-h-[32px] ${
+                      isCopying || !message.content || message.content.trim().length === 0
+                        ? 'text-gray-400 cursor-not-allowed bg-gray-100'
+                        : 'text-gray-700 hover:text-gray-900 hover:bg-gray-200 cursor-pointer'
+                    }`}
+                  >
+                    {isCopying ? (
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" />Copying...</>
+                    ) : (
+                      <><Copy className="w-3.5 h-3.5" />Copy</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onExport('doc', message.content)}
+                    disabled={isExporting}
+                    className={`inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors min-h-[32px] ${
+                      isExporting
+                        ? 'text-gray-400 cursor-not-allowed bg-gray-100'
+                        : 'text-gray-700 hover:text-gray-900 hover:bg-gray-200 cursor-pointer'
+                    }`}
+                  >
+                    {isExporting ? (
+                      <><Loader2 className="w-3.5 h-3.5 animate-spin" />Exporting...</>
+                    ) : (
+                      <><File className="w-3.5 h-3.5" />Export DOC</>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  },
+  // Custom comparator: skip re-render if visible content and UI state are unchanged.
+  // Deliberately ignores onExport/onCopy reference changes — they always capture fresh
+  // state by the time the user clicks (export/copy only happen after streaming ends).
+  (prev, next) =>
+    prev.message.id === next.message.id &&
+    prev.message.content === next.message.content &&
+    prev.isLastAssistantMessage === next.isLastAssistantMessage &&
+    prev.isExporting === next.isExporting &&
+    prev.isCopying === next.isCopying &&
+    prev.userInitial === next.userInitial
+);
+
+// ---------------------------------------------------------------------------
+
 function ChatContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -87,6 +223,10 @@ function ChatContent() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const hasMountedRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const draftSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const retryInputRef = useRef<string>('');
+  const handleSendRef = useRef<(() => void) | null>(null);
 
   // Remove raw markdown bold markers that break UI (e.g. **bold**)
   const sanitizeContent = (text: string | undefined | null) => {
@@ -98,6 +238,44 @@ function ChatContent() {
   const getStorageKey = useCallback((userId: string | undefined) => {
     return userId ? `ai_chat_draft_${userId}` : 'ai_chat_draft';
   }, []);
+
+  // ✅ FIX: Debounced save to prevent race conditions
+  const saveDraftToLocalStorage = useCallback(async () => {
+    if (!user?.id || !saveChat) return;
+    
+    try {
+      const payload = {
+        messages,
+        meta: {
+          currentConversationId,
+          saveChat,
+          selectedFormat,
+          wordCount,
+        },
+        savedAt: new Date().toISOString(),
+      };
+      
+      localStorage.setItem(getStorageKey(user.id), JSON.stringify(payload));
+      console.log('✅ Draft saved to localStorage');
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+        console.warn('localStorage quota exceeded, clearing old entries');
+        const keys = Object.keys(localStorage);
+        const draftKeys = keys.filter(k => k.startsWith('ai_chat_draft_'));
+        if (draftKeys.length > 1) {
+          draftKeys.slice(1).forEach(k => localStorage.removeItem(k));
+          try {
+            localStorage.setItem(getStorageKey(user.id), JSON.stringify(payload));
+            console.log('✅ Draft saved after cleanup');
+          } catch (retryError) {
+            console.error('Failed to save draft after cleanup:', retryError);
+          }
+        }
+      } else {
+        console.error('Failed to persist chat draft:', e);
+      }
+    }
+  }, [messages, currentConversationId, saveChat, selectedFormat, wordCount, user?.id, getStorageKey]);
 
   // Load chat history list - MOVED UP to avoid ReferenceError
   const loadChatHistory = useCallback(async () => {
@@ -125,7 +303,12 @@ function ChatContent() {
     if (retryCountdown === null || retryCountdown <= 0) {
       if (retryCountdown === 0) {
         setRetryCountdown(null);
-        handleSend();
+        if (retryInputRef.current) {
+          setInput(retryInputRef.current);
+          retryInputRef.current = '';
+          // Use setTimeout so setInput state update commits before handleSend reads it
+          setTimeout(() => handleSendRef.current?.(), 0);
+        }
       }
       return;
     }
@@ -144,33 +327,41 @@ function ChatContent() {
     const supabase = getSupabaseClient();
     
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      // Clear all state immediately on ANY user change event to prevent leakage
-      if (event === 'SIGNED_OUT' || event === 'USER_UPDATED' || event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
-        console.log('Auth event:', event, '- Clearing state');
+      // ✅ FIX: Only clear state on actual logout, not on normal auth events
+      if (event === 'SIGNED_OUT') {
+        // User explicitly signed out - clear everything
+        console.log('User signed out, clearing state');
         setMessages([]);
         setCurrentConversationId(null);
         setChatHistory([]);
         setUser(null);
-        setLoading(true); // Reset loading to force a fresh session check
-        
-        // Also clear any UI-specific state
+        setLoading(true);
         setInput('');
         setShowFormatOptions(false);
         setQuickTestContent('');
         setCurrentQuiz(null);
-      }
-
-      if (event === 'SIGNED_OUT') {
-        // Use hard redirect on signout to prevent stuck loading state and clear all memory/auth state
-        console.log('User signed out, redirecting to login');
+        
+        // Hard redirect to prevent stuck states
         window.location.href = '/login';
       } else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        // User signed in - set user and load chat history
         if (session?.user) {
           setUser(session.user);
           setLoading(false);
           loadChatHistory();
         } else {
           setLoading(false);
+        }
+      } else if (event === 'USER_UPDATED') {
+        // ✅ FIX: Don't clear messages on token refresh - just update user
+        if (session?.user) {
+          setUser(session.user);
+        }
+        // Keep messages, chat history, and conversation intact
+      } else if (event === 'PASSWORD_RECOVERY') {
+        // ✅ FIX: Minimal state change for password recovery
+        if (session?.user) {
+          setUser(session.user);
         }
       }
     });
@@ -265,34 +456,55 @@ function ChatContent() {
     // Early restore skipped - will restore after auth completes with user-specific key
   }, []);
 
-  // Persist messages and some meta to localStorage so chats survive refresh
-  // Use user-specific key to prevent cross-user data leakage
+  // ✅ FIX: Debounced save to prevent race conditions
   useEffect(() => {
-    // Avoid writing to localStorage on the very first render — this prevents overwriting
-    // an existing draft that we're about to restore.
     if (!hasMountedRef.current) {
       hasMountedRef.current = true;
       return;
     }
-    // Don't save if no user (not authenticated yet)
-    if (!user?.id) return;
+    if (!user?.id || !saveChat) return;
     
-    try {
-      const payload = {
-        messages,
-        meta: {
-          currentConversationId,
-          saveChat,
-          selectedFormat,
-          wordCount,
-        },
-        savedAt: new Date().toISOString(),
-      };
-      localStorage.setItem(getStorageKey(user.id), JSON.stringify(payload));
-    } catch (e) {
-      // Ignore storage errors (e.g. private mode)
-      console.error('Failed to persist chat draft:', e);
+    // Clear existing timer
+    if (draftSaveTimerRef.current) {
+      clearTimeout(draftSaveTimerRef.current);
     }
+    
+    // Schedule save after 300ms of no changes
+    draftSaveTimerRef.current = setTimeout(() => {
+      saveDraftToLocalStorage();
+    }, 300);
+    
+    return () => {
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current);
+      }
+    };
+  }, [messages, currentConversationId, saveChat, selectedFormat, wordCount, user?.id, saveDraftToLocalStorage]);
+
+  // ✅ FIX: Save draft on page unload (critical safety net)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (messages.length > 0 && saveChat && !currentConversationId) {
+        try {
+          const payload = {
+            messages,
+            meta: {
+              currentConversationId,
+              saveChat,
+              selectedFormat,
+              wordCount,
+            },
+            savedAt: new Date().toISOString(),
+          };
+          localStorage.setItem(getStorageKey(user?.id), JSON.stringify(payload));
+        } catch (e) {
+          console.error('Failed to save on unload:', e);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [messages, currentConversationId, saveChat, selectedFormat, wordCount, user?.id, getStorageKey]);
 
   // Scroll to bottom on new messages or loading state
@@ -697,6 +909,7 @@ ${userInput}`,
     }
 
     const userInput = input.trim();
+    retryInputRef.current = userInput; // store for potential rate-limit retry
     console.log('handleSend called with input:', userInput.substring(0, 50));
 
     if (!isValidContent(userInput)) {
@@ -753,6 +966,10 @@ ${userInput}`,
     setShowFormatOptions(false);
     setIsLoading(true);
 
+    // ✅ FIXED: Create a fresh AbortController for this request
+    abortControllerRef.current = new AbortController();
+    const currentAbortController = abortControllerRef.current;
+
     try {
       console.log('🚀 Starting handleSend...');
       const supabase = getSupabaseClient();
@@ -766,23 +983,10 @@ ${userInput}`,
 
       console.log('✅ User authenticated:', currentUser.id);
 
-      // Save user message immediately if saveChat is ON
-      // Store the returned conversation ID to use for assistant message
-      let savedConversationId: string | null = null;
-      if (saveChat && currentUser) {
-        try {
-          console.log('💾 Saving user message...');
-          savedConversationId = await saveMessageToDatabase({
-            ...userMessage,
-            content: userInput // Save ACTUAL input in DB for LLM reference, but UI shows friendly message
-          }, currentUser.id);
-          console.log('✅ User message saved, conversationId:', savedConversationId);
-        } catch (saveError) {
-          console.error('Error saving user message:', saveError);
-          // Continue with chat even if save fails
-        }
-      }
-
+      // The /api/chat route owns conversation creation and message saving.
+      // We no longer pre-save here to avoid the double-write race where a
+      // network failure mid-save creates an orphaned conversation while
+      // /api/chat simultaneously creates a second one.
       const { data: { session } } = await supabase.auth.getSession();
       console.log('Session token exists:', !!session?.access_token);
 
@@ -793,21 +997,31 @@ ${userInput}`,
           'Content-Type': 'application/json',
           ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
         },
+        signal: currentAbortController.signal,
+        keepalive: true, // keeps fetch alive when tab loses focus
         body: JSON.stringify({
-          question: userInput, // Raw question for saving
-          prompt: processedInput, // Formatted prompt for LLM
-          conversationId: currentConversationId || savedConversationId, // Pass conversationId if we have it
+          question: userInput,    // raw question — saved to DB by the route
+          prompt: processedInput, // formatted prompt sent to the LLM
+          conversationId: currentConversationId,
           userId: currentUser.id,
         }),
       });
 
       console.log('📥 API Response:', response.status, response.statusText);
 
-      if (response.status === 429 || response.status === 503) {
+      // ✅ FIXED: Handle 429 (rate limit) status code properly
+      if (response.status === 429) {
         const errorData = await response.json().catch(() => ({}));
         const retryAfter = errorData.retryAfter ?? 15;
         setRetryCountdown(retryAfter);
-        throw new Error(sanitizeAIError(`API error (${response.status})`));
+        throw new Error(`Rate limited. Please wait ${retryAfter}s before trying again.`);
+      }
+
+      if (response.status === 503) {
+        const errorData = await response.json().catch(() => ({}));
+        const retryAfter = errorData.retryAfter ?? 15;
+        setRetryCountdown(retryAfter);
+        throw new Error(sanitizeAIError(`Service temporarily unavailable. Please try again in ${retryAfter}s.`));
       }
 
       if (!response.ok) {
@@ -841,6 +1055,7 @@ ${userInput}`,
         console.log('🔄 Starting to read stream...');
         let streamEnded = false;
         let chunkCount = 0;
+        let lineBuffer = ''; // accumulate partial SSE lines across chunk boundaries
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
@@ -849,7 +1064,7 @@ ${userInput}`,
               assistantContent = 'No response received from the AI. Please check your API key and try again.';
               setMessages((prev) => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { 
+                updated[updated.length - 1] = {
                   id: messageId,
                   role: 'assistant',
                   content: assistantContent,
@@ -857,30 +1072,19 @@ ${userInput}`,
                 };
                 return updated;
               });
-            } else {
-              // Save assistant message if toggle is ON
-              // Pass the conversation ID from when we saved the user message
-              if (saveChat && currentUser) {
-                try {
-                  await saveMessageToDatabase({
-                    id: messageId,
-                    role: 'assistant',
-                    content: assistantContent,
-                    timestamp: new Date(),
-                  }, currentUser.id, savedConversationId);
-                } catch (saveError) {
-                  console.error('Error saving assistant message:', saveError);
-                  showToastMessage('Chat saved, but failed to save last message. Please try again.');
-                }
-              }
             }
+            // NOTE: The server's flush() handler in /api/chat saves the assistant message.
+            // No duplicate save here.
             break;
           }
 
           chunkCount++;
-          const chunk = decoder.decode(value);
+          // { stream: true } handles multi-byte UTF-8 characters split across chunks
+          const chunk = decoder.decode(value, { stream: true });
           console.log(`📦 Chunk ${chunkCount}:`, chunk.substring(0, 100));
-          const lines = chunk.split('\n');
+          lineBuffer += chunk;
+          const lines = lineBuffer.split('\n');
+          lineBuffer = lines.pop() ?? ''; // retain incomplete last line for next chunk
 
           for (const line of lines) {
             if (line.trim().startsWith('data: ')) {
@@ -921,7 +1125,7 @@ ${userInput}`,
                 if (parsed.sources) {
                   setMessages((prev) => {
                     const updated = [...prev];
-                    updated[updated.length - 1] = { 
+                    updated[updated.length - 1] = {
                       id: messageId,
                       role: 'assistant',
                       content: assistantContent,
@@ -930,6 +1134,13 @@ ${userInput}`,
                     };
                     return updated;
                   });
+                }
+                // The server sends {conversationId, sources} in its final SSE event.
+                // Capture the ID here so subsequent messages go to the same conversation.
+                if (parsed.conversationId && !currentConversationId) {
+                  setCurrentConversationId(parsed.conversationId);
+                  try { localStorage.removeItem(getStorageKey(user?.id)); } catch { /* ignore */ }
+                  setTimeout(() => window.dispatchEvent(new CustomEvent('chatSaved')), 300);
                 }
               } catch (parseErr) {
                 console.warn('Failed to parse JSON:', dataStr.substring(0, 50), parseErr);
@@ -957,6 +1168,7 @@ ${userInput}`,
       setIsLoading(false);
     }
   };
+  handleSendRef.current = handleSend; // always point to latest closure
 
   // Save a single message to database (creates conversation if needed)
   // Returns the conversation ID (new or existing)
@@ -1184,23 +1396,44 @@ ${userInput}`,
       const cleanTitle = title.replace(/[^a-z0-9]/gi, '_');
 
       if (type === 'pdf') {
-        showToastMessage('Generating PDF...');
-        
+        showToastMessage('Generating PDF preview...');
+
         try {
-          // Try server-side generation first
+          const supabase = getSupabaseClient();
+          const { data: { session: pdfSession } } = await supabase.auth.getSession();
+
           const response = await fetch('/api/chat/pdf', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              ...(pdfSession?.access_token && { 'Authorization': `Bearer ${pdfSession.access_token}` }),
             },
-            body: JSON.stringify({
-              markdown: messageContent,
-              title: title,
-              filename: `${cleanTitle}.pdf`,
-            }),
+            body: JSON.stringify({ markdown: messageContent, title }),
           });
 
           if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+
+            if (contentType.includes('text/html')) {
+              // New path: open professional HTML preview in a new window.
+              // The toolbar inside the HTML has a "Save as PDF" button.
+              const html = await response.text();
+              const printWindow = window.open('', '_blank', 'width=960,height=780,noopener');
+              if (printWindow) {
+                printWindow.document.open();
+                printWindow.document.write(html);
+                printWindow.document.close();
+                showToastMessage('PDF preview opened — click "Save as PDF" in the toolbar');
+              } else {
+                // Pop-up blocked — download the HTML file as fallback
+                const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+                downloadFile(blob, `${cleanTitle}.html`);
+                showToastMessage('Preview blocked. HTML file downloaded — open and print to PDF.');
+              }
+              return;
+            }
+
+            // Legacy binary PDF path (kept for future use)
             const blob = await response.blob();
             if (blob.size > 0) {
               downloadFile(blob, `${cleanTitle}.pdf`);
@@ -1208,33 +1441,30 @@ ${userInput}`,
               return;
             }
           }
-          
-          throw new Error('Server-side PDF generation failed');
+
+          throw new Error('Server PDF generation failed');
         } catch (serverError) {
-          console.warn('Server-side PDF failed, using client-side generation:', serverError);
+          console.warn('Server PDF failed, falling back to client generator:', serverError);
           showToastMessage('Generating PDF with backup method...');
-          
+
           try {
-            // Use client-side jsPDF as fallback
             const pdfBlob = generateClientPDF({
-              title: title,
+              title,
               content: messageContent,
               author: 'QuickNotes',
-              subject: 'Study Notes'
+              subject: 'Study Notes',
             });
-            
             downloadFile(pdfBlob, `${cleanTitle}.pdf`);
-            showToastMessage('PDF generated successfully!');
+            showToastMessage('PDF generated (backup method)');
           } catch (clientError) {
-            console.error('Client-side PDF generation failed:', clientError);
-            showToastMessage('Trying text file export...');
-            
+            console.error('Client PDF generation failed:', clientError);
             try {
-              const textBlob = new Blob([messageContent], { type: 'text/plain; charset=utf-8' });
-              downloadFile(textBlob, `${cleanTitle}.txt`);
+              downloadFile(
+                new Blob([messageContent], { type: 'text/plain; charset=utf-8' }),
+                `${cleanTitle}.txt`
+              );
               showToastMessage('Downloaded as text file');
-            } catch (fallbackError) {
-              console.error('All export methods failed:', fallbackError);
+            } catch {
               showToastMessage('Could not export. Please copy text manually.');
             }
           }
@@ -1441,6 +1671,7 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
           'Content-Type': 'application/json',
           ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
         },
+        keepalive: true, // ✅ Also needs keepalive for quiz generation
         body: JSON.stringify({
           question: quizPrompt,
         }),
@@ -1450,46 +1681,49 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
         throw new Error('API request failed');
       }
 
-      const data = await response.json();
-      
-      if (!data || !data.content) {
-        throw new Error('Invalid response from server');
+      // ✅ FIX: Parse SSE stream correctly instead of calling .json()
+      let quizContent = '';
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.trim().startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.content) {
+                  quizContent += data.content;
+                }
+              } catch (e) {
+                // Skip parse errors on individual lines
+              }
+            }
+          }
+        }
+      }
+
+      if (!quizContent) {
+        throw new Error('No content received from API');
       }
 
       let quizData;
       try {
-        // Clean the content and try to parse directly
-        let cleanContent = data.content.trim();
-        
-        // Remove common streaming prefixes that might interfere
-        if (cleanContent.startsWith('data: ')) {
-          cleanContent = cleanContent.substring(6);
-        }
-        
-        // Remove any leading/trailing whitespace and newlines
-        cleanContent = cleanContent.replace(/^\s*[\r\n]+|[\r\n]+\s*$/g, '');
-        
-        // Try to parse the cleaned content
+        // ✅ FIX: Parse the accumulated SSE content
+        let cleanContent = quizContent.trim();
         quizData = JSON.parse(cleanContent);
       } catch (firstError) {
-        console.warn('Direct JSON parsing failed:', firstError);
+        console.warn('Direct parsing failed, extracting JSON:', firstError);
         
         try {
-          // If direct parsing fails, try to extract JSON from the response
-          let content = data.content;
-          
-          // Handle streaming format like "data: {...}"
-          if (content.includes('data: {')) {
-            const dataMatch = content.match(/data:\s*(\{[\s\S]*?\})/);
-            if (dataMatch) {
-              content = dataMatch[1];
-            }
-          }
-          
-          // Extract the largest JSON object
-          const jsonMatches = content.match(/\{[\s\S]*\}/g);
+          const jsonMatches = quizContent.match(/\{[\s\S]*\}/g);
           if (jsonMatches) {
-            // Try parsing each match, starting with the longest
             const sortedMatches = jsonMatches.sort((a: string, b: string) => b.length - a.length);
             
             for (const match of sortedMatches) {
@@ -1497,7 +1731,6 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
                 const cleanMatch = match.trim();
                 quizData = JSON.parse(cleanMatch);
                 
-                // Validate that this is actually quiz data
                 if (quizData && quizData.questions && Array.isArray(quizData.questions)) {
                   break;
                 }
@@ -1505,20 +1738,14 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
                 continue;
               }
             }
-            
-            if (!quizData) {
-              throw new Error('Could not parse any valid quiz JSON');
-            }
-          } else {
-            throw new Error('No JSON structure found in response');
+          }
+          
+          if (!quizData) {
+            throw new Error('No valid quiz JSON found');
           }
         } catch (secondError) {
-          console.error('All JSON parsing attempts failed:', {
-            firstError,
-            secondError,
-            rawContent: data.content.substring(0, 200) + '...'
-          });
-          throw new Error('Could not parse quiz data from API response');
+          console.error('All parsing failed:', secondError);
+          throw new Error('Failed to parse quiz response');
         }
       }
 
@@ -1746,15 +1973,28 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">AI Assistant</h1>
-              {messages.length > 0 && (
+              {(messages.length > 0 || isLoading) && (
                 <button
                   onClick={() => {
+                    abortControllerRef.current?.abort();
+                    setIsLoading(false);
                     setMessages([]);
                     setInput('');
                     setCurrentConversationId(null);
                     setShowFormatOptions(false);
+                    setQuickTestContent('');
+                    setCurrentQuiz(null);
+                    setUserAnswers({});
+                    setQuizSubmitted(false);
+                    setQuizResults(null);
+                    setShowQuickTestDifficulty(false);
+                    setIsGeneratingQuiz(false);
+                    setRetryCountdown(null);
+                    setExpandedHistoryId(null);
+                    setExpandedHistoryMessages([]);
+                    retryInputRef.current = '';
                   }}
-                  className="px-2 py-1 text-xs sm:text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 rounded transition-colors font-medium whitespace-nowrap hidden sm:inline-block"
+                  className="px-2 py-1 text-xs sm:text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 rounded transition-colors font-medium whitespace-nowrap"
                   title="Start a new chat"
                 >
                   + New Chat
@@ -1810,147 +2050,28 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
               </div>
             ) : (
               <>
-                {messages.map((message, index) => {
-                  const lastAssistantIndex = messages.map((m, i) => ({ role: m.role, index: i }))
-                    .filter(({ role }) => role === 'assistant')
-                    .pop()?.index ?? -1;
-                  const isLastAssistantMessage = message.role === 'assistant' && index === lastAssistantIndex;
-
-                  return (
-                    <div key={message.id} className={`w-full py-3 sm:py-4 ${
-                      message.role === 'user' ? 'bg-white' : 'bg-gray-50'
-                    } border-b border-gray-100 last:border-b-0`}>
-                      <div className="max-w-4xl mx-auto px-3 sm:px-4 lg:px-6">
-                        <div className="flex gap-3 sm:gap-4">
-                          <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            message.role === 'user' 
-                              ? 'bg-blue-600 text-white' 
-                              : 'bg-gray-800 text-white'
-                          }`}>
-                            {message.role === 'user' ? (
-                              <span className="text-xs font-medium">
-                                {user?.user_metadata?.full_name?.[0] || user?.email?.[0] || 'U'}
-                              </span>
-                            ) : (
-                              <span className="text-xs">AI</span>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-gray-900 leading-relaxed">
-                              {message.role === 'assistant' ? renderMarkdown(message.content) : (
-                                <div className="whitespace-pre-wrap text-left">
-                                  {message.content}
-                                </div>
-                              )}
-                            </div>
-                            {message.sources && message.sources.length > 0 && (
-                              <div className="mt-4 pt-3 border-t border-gray-200">
-                                <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-gray-600">Sources</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {message.sources.map((source, idx) => (
-                                    <span
-                                      key={idx}
-                                      className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-gray-100 text-gray-700"
-                                    >
-                                      {source.name}
-                                      {source.page && <span className="text-gray-500">p. {source.page}</span>}
-                                    </span>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            {/* Export buttons only on the LAST assistant message */}
-                            {isLastAssistantMessage && message.content && message.content.trim().length > 0 && (
-                              <div className="mt-4 pt-3 border-t border-gray-200 flex flex-col sm:flex-row gap-2">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    console.log('Export PDF button clicked');
-                                    handleExport('pdf', message.content);
-                                  }}
-                                  disabled={isExporting}
-                                  className={`inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors min-h-[32px] ${
-                                    isExporting
-                                      ? 'text-gray-400 cursor-not-allowed bg-gray-100'
-                                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-200 cursor-pointer'
-                                  }`}
-                                >
-                                  {isExporting ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      Exporting...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <FileText className="w-3.5 h-3.5" />
-                                      Export PDF
-                                    </>
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    console.log('Copy button clicked');
-                                    handleCopy(message.content);
-                                  }}
-                                  disabled={isCopying || !message.content || message.content.trim().length === 0}
-                                  className={`inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors min-h-[32px] ${
-                                    isCopying || !message.content || message.content.trim().length === 0
-                                      ? 'text-gray-400 cursor-not-allowed bg-gray-100'
-                                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-200 cursor-pointer'
-                                  }`}
-                                >
-                                  {isCopying ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      Copying...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy className="w-3.5 h-3.5" />
-                                      Copy
-                                    </>
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    console.log('Export DOC button clicked');
-                                    handleExport('doc', message.content);
-                                  }}
-                                  disabled={isExporting}
-                                  className={`inline-flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-colors min-h-[32px] ${
-                                    isExporting
-                                      ? 'text-gray-400 cursor-not-allowed bg-gray-100'
-                                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-200 cursor-pointer'
-                                  }`}
-                                >
-                                  {isExporting ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      Exporting...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <File className="w-3.5 h-3.5" />
-                                      Export DOC
-                                    </>
-                                  )}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                {(() => {
+                  // Compute once — not inside the map — to avoid O(N²) work
+                  const lastAssistantIndex = messages.reduce(
+                    (acc, m, i) => (m.role === 'assistant' ? i : acc),
+                    -1
                   );
-                })}
+                  const userInitial =
+                    user?.user_metadata?.full_name?.[0] || user?.email?.[0] || 'U';
+
+                  return messages.map((message, index) => (
+                    <MessageCard
+                      key={message.id}
+                      message={message}
+                      isLastAssistantMessage={message.role === 'assistant' && index === lastAssistantIndex}
+                      userInitial={userInitial}
+                      isExporting={isExporting}
+                      isCopying={isCopying}
+                      onExport={handleExport}
+                      onCopy={handleCopy}
+                    />
+                  ));
+                })()}
                 {isLoading && (
                   <div className="w-full py-3 sm:py-4 bg-gray-50 border-b border-gray-100">
                     <div className="max-w-4xl mx-auto px-3 sm:px-4 lg:px-6">
@@ -2280,12 +2401,21 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
                 />
               </div>
               <button
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading}
+                onClick={() => {
+                  if (isLoading) {
+                    // ✅ FIXED: Cancel the current request on button click
+                    abortControllerRef.current?.abort();
+                    setIsLoading(false);
+                    showToastMessage('Request cancelled.');
+                  } else {
+                    handleSend();
+                  }
+                }}
+                disabled={!input.trim() && !isLoading}
                 className="flex items-center justify-center bg-blue-600 text-white w-10 h-10 sm:w-11 sm:h-11 rounded-full hover:bg-blue-700 active:bg-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 shadow-sm hover:shadow-md touch-target"
               >
                 {isLoading ? (
-                  <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
+                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
                 ) : (
                   <Send className="w-4 h-4 sm:w-5 sm:h-5" />
                 )}
@@ -2320,14 +2450,58 @@ Generate exactly ${numQuestions} questions. Return only valid JSON.`;
   );
 }
 
+// ✅ FIX: Error boundary to prevent blank pages
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('ErrorBoundary caught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-gray-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-md text-center">
+            <h1 className="text-xl font-bold text-gray-900 mb-2">Something went wrong</h1>
+            <p className="text-gray-600 mb-4">
+              {this.state.error?.message || 'An unexpected error occurred'}
+            </p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export default function ChatPage() {
   return (
-    <Suspense fallback={
-      <div className="flex items-center justify-center h-screen bg-gray-50">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-      </div>
-    }>
-      <ChatContent />
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={
+        <div className="flex items-center justify-center min-h-screen bg-gray-50">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        </div>
+      }>
+        <ChatContent />
+      </Suspense>
+    </ErrorBoundary>
   );
 }

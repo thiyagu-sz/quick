@@ -1,3 +1,4 @@
+import { OpenRouterGateway } from './openrouterGateway';
 import { CONFIG } from '../config';
 import { AppError } from '../errors/errorHandler';
 
@@ -15,26 +16,28 @@ export interface AiConfig {
 }
 
 const DEFAULT_CONFIG: AiConfig = {
-  model: CONFIG.AI.DEFAULT_MODEL,
+  model: 'openrouter/auto',
   maxTokens: CONFIG.AI.MAX_TOKENS,
   temperature: CONFIG.AI.TEMPERATURE,
   timeout: CONFIG.AI.TIMEOUT,
   concurrencyLimit: CONFIG.AI.CONCURRENCY_LIMIT,
   retryAttempts: CONFIG.AI.RETRY_ATTEMPTS,
-  initialRetryDelay: 1000, // 1s as requested
+  initialRetryDelay: 1000,
 };
 
-const FALLBACK_MODELS = [
-  CONFIG.AI.FALLBACK_MODEL,
-  'meta-llama/llama-3-8b-instruct:free',
-  'google/gemini-2.0-flash-001'
-];
-
-// NOTE: In-memory semaphores are ineffective on Vercel serverless.
-// Global concurrency is enforced via Upstash Redis rate limiting in middleware.ts.
+/**
+ * Metadata attached to all requests for observability
+ */
+interface RequestMetadata {
+  userId: string;
+  feature: 'chat' | 'notes' | 'upload' | 'embedding';
+  conversationId?: string;
+  environment: string | undefined;
+}
 
 /**
- * Central AI Service Layer (OpenRouter / AI Agnostic)
+ * Central AI Service Layer via Cloudflare AI Gateway
+ * Cloudflare handles: retries, failover, caching, rate limiting, analytics
  */
 export class AiService {
   /**
@@ -44,253 +47,252 @@ export class AiService {
     const message = error?.message || '';
     const status = error?.status || 0;
 
-    // Internal Logging
-    console.error("AI API ERROR:", {
-      status,
-      message,
-      name: error.name,
-      timestamp: new Date().toISOString()
-    });
-
-    if (error.name === 'AbortError' || message.includes('timeout')) {
-      return "The AI model is currently busy. Please try again in a moment.";
+    if (error?.name === 'AbortError' || message.includes('timeout')) {
+      return 'The AI model is currently busy. Please try again in a moment.';
     }
-    
+
     if (status === 429 || message.includes('rate limit')) {
-      return "The AI model is currently busy. Please try again in a moment.";
+      return 'The AI service is temporarily busy. Please try again shortly.';
     }
 
     if (status === 401 || status === 403 || message.includes('auth') || message.includes('key')) {
-      return `Our AI service is temporarily unavailable. (Status: ${status}, Message: ${message.substring(0, 50)})`;
+      return 'Our AI service is temporarily unavailable.';
     }
 
-    return "Our AI service is temporarily unavailable. Please try again shortly.";
+    if (status >= 500) {
+      return 'The AI service is temporarily unavailable. Please try again in a few moments.';
+    }
+
+    return 'Our AI service encountered an error. Please try again.';
   }
 
   /**
-   * Centralized AI Request Handler with Retry & Fallback
+   * Streaming chat response via Cloudflare AI Gateway
+   * Gateway handles retries, failover, caching automatically
    */
-  static async safeAIRequest(
+  static async streamChat(
     messages: { role: string; content: string }[],
-    options: Partial<AiConfig> = {},
-    isStreaming: boolean = false
-  ): Promise<any> {
-    const config = { ...DEFAULT_CONFIG, ...options };
-    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
-    
-    // API Key Validation
-    if (!apiKey) {
-      console.error("[AiService] GOOGLE_GENERATIVE_AI_API_KEY is missing");
-      throw new Error("API key missing");
-    }
+    config: Partial<AiConfig> = {},
+    metadata?: Partial<RequestMetadata>
+  ): Promise<ReadableStream> {
+    const finalConfig = { ...DEFAULT_CONFIG, ...config };
+    const encoder = new TextEncoder();
 
-    const model = 'models/gemini-2.0-flash';
-    const maxRetries = 2;
+    try {
+      console.log('[AiService] Streaming via OpenRouter', {
+        feature: metadata?.feature || 'chat',
+        messageCount: messages.length,
+      });
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const abortController = new AbortController();
-      const timeoutId = setTimeout(() => abortController.abort(), config.timeout);
+      // Convert messages for API
+      const apiMessages = messages.map(m => ({
+        role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant' | 'system',
+        content: m.content,
+      }));
 
-      try {
-        // Convert messages to Google Gemini format
-        const contents = messages.map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }]
-        }));
-
-        const endpoint = isStreaming 
-          ? `https://generativelanguage.googleapis.com/v1/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`
-          : `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`;
-
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+      // Get stream from OpenRouter
+      const streamResponse = await OpenRouterGateway.streamRequest({
+        model: finalConfig.model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an elite academic research assistant for QuickNotes. Provide professional, publication-ready responses.',
           },
-          signal: abortController.signal,
-          body: JSON.stringify({
-            contents,
-            generationConfig: {
-              maxOutputTokens: config.maxTokens,
-              temperature: config.temperature,
+          ...apiMessages,
+        ],
+        temperature: finalConfig.temperature,
+        max_tokens: finalConfig.maxTokens,
+      });
+
+      // Convert Cloudflare stream to SSE format for frontend
+      return new ReadableStream({
+        async start(controller) {
+          try {
+            const reader = streamResponse.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              const chunk = decoder.decode(value, { stream: true });
+              buffer += chunk;
+
+              const lines = buffer.split('\n');
+              buffer = lines[lines.length - 1]; // Keep incomplete line in buffer
+
+              for (let i = 0; i < lines.length - 1; i++) {
+                const line = lines[i].trim();
+                if (line.startsWith('data: ')) {
+                  try {
+                    const jsonStr = line.slice(6);
+                    if (jsonStr === '[DONE]') {
+                      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                      continue;
+                    }
+                    const data = JSON.parse(jsonStr);
+                    if (data.choices?.[0]?.delta?.content) {
+                      const content = data.choices[0].delta.content;
+                      controller.enqueue(
+                        encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
+                      );
+                    }
+                  } catch (e) {
+                    // Skip JSON parse errors
+                  }
+                }
+              }
             }
-          }),
-        });
 
-        clearTimeout(timeoutId);
+            // Flush remaining buffer
+            if (buffer.trim().startsWith('data: ')) {
+              try {
+                const jsonStr = buffer.trim().slice(6);
+                if (jsonStr !== '[DONE]') {
+                  const data = JSON.parse(jsonStr);
+                  if (data.choices?.[0]?.delta?.content) {
+                    const content = data.choices[0].delta.content;
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
+                    );
+                  }
+                }
+              } catch (e) {
+                // Skip
+              }
+            }
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          const error = new Error(errorData.error?.message || `Request failed with status ${response.status}`);
-          (error as any).status = response.status;
-          throw error;
-        }
-
-        if (isStreaming) {
-          return response.body;
-        } else {
-          const data = await response.json();
-          return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        }
-
-      } catch (error: any) {
-        clearTimeout(timeoutId);
-        const status = error.status;
-
-        console.error(`[AI] Model ${model} attempt ${attempt} failed with ${status || error.name}`);
-
-        if (status === 401) {
-          throw new Error("API key is invalid or out of credits. Contact support.");
-        }
-
-        if (status === 400) {
-          throw new Error("Invalid request. Please check your input.");
-        }
-
-        if ((status === 429 || status === 503 || status === 504 || error.name === 'AbortError') && attempt < maxRetries) {
-          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-
-        throw error;
-      }
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          } catch (error: any) {
+            console.error('[AiService] Stream processing error:', error.message);
+            const safeMessage = AiService.getSafeUserMessage(error);
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ error: safeMessage })}\n\n`)
+            );
+            controller.close();
+          }
+        },
+      });
+    } catch (error: any) {
+      console.error('[AiService] Stream initialization failed:', error.message);
+      return new ReadableStream({
+        start(controller) {
+          const safeMessage = AiService.getSafeUserMessage(error);
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ error: safeMessage })}\n\n`)
+          );
+          controller.close();
+        },
+      });
     }
-
-    throw new Error("AI service is temporarily unavailable. Please try again in a moment.");
   }
 
   /**
-   * Generates embeddings for text (OpenAI)
+   * Non-streaming completion via Cloudflare AI Gateway
    */
-  static async generateEmbedding(text: string): Promise<number[]> {
-    const apiKey = process.env.OPENAI_API_KEY?.trim();
-    
-    const generateFallbackEmbedding = (inputText: string): number[] => {
-      const hash = inputText.split('').reduce((acc, char) => {
-        const hash = ((acc << 5) - acc) + char.charCodeAt(0);
-        return hash & hash;
-      }, 0);
-      return new Array(384).fill(0).map((_, i) => Math.sin((hash + i) * 0.1) * 0.1);
-    };
-    
-    if (!apiKey || apiKey === '' || apiKey === 'your_openai_api_key_here') {
-      return generateFallbackEmbedding(text);
-    }
+  static async complete(
+    messages: { role: string; content: string }[],
+    config: Partial<AiConfig> = {},
+    metadata?: Partial<RequestMetadata>
+  ): Promise<string> {
+    const finalConfig = { ...DEFAULT_CONFIG, ...config };
 
-    let retryDelay = 1000;
-    for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      console.log('[AiService] Completing via OpenRouter', {
+        feature: metadata?.feature || 'notes',
+        messageCount: messages.length,
+      });
+
+      const apiMessages = messages.map(m => ({
+        role: (m.role === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant' | 'system',
+        content: m.content,
+      }));
+
+      const content = await OpenRouterGateway.complete({
+        model: finalConfig.model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert study guide creator. Create concise, focused study notes.',
+          },
+          ...apiMessages,
+        ],
+        temperature: finalConfig.temperature,
+        max_tokens: finalConfig.maxTokens,
+      });
+
+      console.log('[AiService] Completion successful', {
+        contentLength: content.length,
+      });
+
+      return content;
+    } catch (error: any) {
+      console.error('[AiService] Completion failed:', error.message);
+      const safeMessage = this.getSafeUserMessage(error);
+      throw new AppError(safeMessage, 500, 'AI_ERROR', error);
+    }
+  }
+
+  /**
+   * Generates embeddings via OpenAI or fallback hash
+   */
+  static async generateEmbedding(
+    text: string,
+    userId: string = 'unknown'
+  ): Promise<number[]> {
+    try {
+      const generateFallbackEmbedding = (inputText: string): number[] => {
+        const hash = inputText.split('').reduce((acc, char) => {
+          const h = ((acc << 5) - acc) + char.charCodeAt(0);
+          return h & h;
+        }, 0);
+        return new Array(384)
+          .fill(0)
+          .map((_, i) => Math.sin((hash + i) * 0.1) * 0.1);
+      };
+
+      const apiKey = process.env.OPENAI_API_KEY?.trim();
+      if (!apiKey || apiKey === '' || apiKey === 'your_openai_api_key_here') {
+        return generateFallbackEmbedding(text);
+      }
+
       try {
         const response = await fetch('https://api.openai.com/v1/embeddings', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
+            Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
             model: 'text-embedding-3-small',
             input: text,
           }),
+          signal: AbortSignal.timeout(15000),
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          return data.data?.[0]?.embedding || generateFallbackEmbedding(text);
+        if (!response.ok) {
+          console.warn('[AiService] OpenAI embedding failed, using fallback');
+          return generateFallbackEmbedding(text);
         }
 
-        if (response.status === 429 && attempt < 2) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
-          retryDelay *= 2;
-          continue;
+        const data = await response.json();
+        const embedding = data.data?.[0]?.embedding;
+
+        if (!embedding || !Array.isArray(embedding)) {
+          return generateFallbackEmbedding(text);
         }
 
-        break;
+        return embedding;
       } catch (error) {
-        if (attempt < 2) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
-          retryDelay *= 2;
-          continue;
-        }
+        console.warn('[AiService] Embedding error, using fallback:', (error as Error).message);
+        return generateFallbackEmbedding(text);
       }
-    }
-
-    return generateFallbackEmbedding(text);
-  }
-
-  /**
-   * Generates a streaming chat response
-   */
-  static async streamChat(
-    messages: { role: string; content: string }[],
-    config: Partial<AiConfig> = {}
-  ): Promise<ReadableStream> {
-    const encoder = new TextEncoder();
-    
-    try {
-      const body = await this.safeAIRequest(messages, config, true);
-      if (!body) throw new Error("No response body");
-
-      return new ReadableStream({
-        async start(controller) {
-          const reader = body.getReader();
-          const decoder = new TextDecoder();
-          let lineBuffer = "";
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              lineBuffer += decoder.decode(value, { stream: true });
-              const lines = lineBuffer.split("\n");
-              lineBuffer = lines.pop() || "";
-
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed || trimmed === "data: [DONE]") continue;
-
-                if (trimmed.startsWith("data: ")) {
-                  try {
-                    const data = JSON.parse(trimmed.slice(6));
-                    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (content) {
-                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
-                    }
-                  } catch (e) {
-                    // Ignore malformed JSON chunks
-                  }
-                }
-              }
-            }
-            controller.close();
-          } catch (error) {
-            controller.error(error);
-          }
-        }
-      });
-
-    } catch (error: any) {
-      return new ReadableStream({
-        start(controller) {
-          const safeMessage = AiService.getSafeUserMessage(error);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: safeMessage })}\n\n`));
-          controller.close();
-        }
-      });
-    }
-  }
-
-  /**
-   * Non-streaming completion
-   */
-  static async complete(
-    messages: { role: string; content: string }[],
-    config: Partial<AiConfig> = {}
-  ): Promise<string> {
-    try {
-      return await this.safeAIRequest(messages, config, false);
-    } catch (error: any) {
-      throw new AppError(AiService.getSafeUserMessage(error), 500, 'AI_ERROR', error);
+    } catch (error) {
+      console.warn('[AiService] Unexpected embedding error');
+      return new Array(384).fill(0);
     }
   }
 }

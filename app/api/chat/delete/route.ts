@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
 import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
+import { upstashRedis } from '@/app/lib/rateLimiter.redis';
+
+export const maxDuration = 10;
+export const runtime = 'nodejs';
 
 export async function DELETE(request: NextRequest) {
   try {
@@ -49,6 +53,13 @@ export async function DELETE(request: NextRequest) {
 
     if (deleteError) {
       throw new AppError('Failed to delete conversation', 500, 'DB_ERROR', deleteError);
+    }
+
+    // Invalidate per-user history cache so deletion reflects immediately in sidebar
+    if (upstashRedis) {
+      for (const limit of [3, 10, 50]) {
+        upstashRedis.del(`chat-history:${user.id}:${limit}`).catch(() => {});
+      }
     }
 
     return NextResponse.json({ success: true, message: 'Conversation deleted' });

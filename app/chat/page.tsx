@@ -227,6 +227,8 @@ function ChatContent() {
   const draftSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const retryInputRef = useRef<string>('');
   const handleSendRef = useRef<(() => void) | null>(null);
+  // Pattern D fix: tracks the authenticated user ID so SIGNED_IN can detect a user switch.
+  const currentUserIdRef = useRef<string | null>(null);
 
   // Remove raw markdown bold markers that break UI (e.g. **bold**)
   const sanitizeContent = (text: string | undefined | null) => {
@@ -344,8 +346,17 @@ function ChatContent() {
         // Hard redirect to prevent stuck states
         window.location.href = '/login';
       } else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-        // User signed in - set user and load chat history
         if (session?.user) {
+          // Pattern D fix: if a DIFFERENT user signed in, clear the previous user's
+          // state before mounting the new user's data. Without this check, messages,
+          // currentConversationId, and chatHistory from user A stay visible to user B.
+          if (currentUserIdRef.current && currentUserIdRef.current !== session.user.id) {
+            setMessages([]);
+            setCurrentConversationId(null);
+            setChatHistory([]);
+            setInput('');
+          }
+          currentUserIdRef.current = session.user.id;
           setUser(session.user);
           setLoading(false);
           loadChatHistory();
@@ -368,12 +379,13 @@ function ChatContent() {
 
     const checkAuth = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      
+
       if (!currentUser) {
         router.push('/login');
         return;
       }
 
+      currentUserIdRef.current = currentUser.id; // Pattern D fix: seed the ref on mount
       setUser(currentUser);
       setLoading(false);
       loadChatHistory();
@@ -537,41 +549,53 @@ function ChatContent() {
     }
   }, [currentQuiz, showQuickTestDifficulty, isGeneratingQuiz]);
 
-  // Restore draft from localStorage after auth/checks complete — only when there's no conversation loaded
-  // Use user-specific key for isolation between users
+  // Restore draft from localStorage after auth completes — only when no conversation is loaded.
   useEffect(() => {
-    if (loading) return; // wait until auth/loadConversation completed
-    if (!user?.id) return; // need user ID for user-specific key
-    // If a conversation was explicitly loaded via URL, prefer that
+    if (loading) return;
+    if (!user?.id) return;
     if (currentConversationId) return;
 
-    try {
-      const raw = localStorage.getItem(getStorageKey(user.id));
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
-        const restored: Message[] = parsed.messages.map((m: any) => ({
-          ...m,
-          content: sanitizeContent(m.content),
-          // restore timestamp strings back to Date objects
-          timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
-        }));
-        setMessages(restored);
+    (async () => {
+      try {
+        const raw = localStorage.getItem(getStorageKey(user.id));
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+          const restored: Message[] = parsed.messages.map((m: any) => ({
+            ...m,
+            content: sanitizeContent(m.content),
+            timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+          }));
+          setMessages(restored);
 
-        if (parsed.meta) {
-          if (parsed.meta.currentConversationId) setCurrentConversationId(parsed.meta.currentConversationId);
-          if (typeof parsed.meta.saveChat === 'boolean') setSaveChat(parsed.meta.saveChat);
-          if (parsed.meta.selectedFormat) setSelectedFormat(parsed.meta.selectedFormat);
-          if (parsed.meta.wordCount) setWordCount(parsed.meta.wordCount);
+          if (parsed.meta) {
+            if (parsed.meta.currentConversationId) {
+              // Pattern E fix: verify the restored conversation ID actually belongs to
+              // the current user before setting it. Silently discard if it doesn't match
+              // (e.g., draft was written under a different user ID or conversation was deleted).
+              const supabase = getSupabaseClient();
+              const { data } = await supabase
+                .from('chat_conversations')
+                .select('id')
+                .eq('id', parsed.meta.currentConversationId)
+                .eq('user_id', user.id)
+                .maybeSingle();
+              if (data) {
+                setCurrentConversationId(parsed.meta.currentConversationId);
+              }
+            }
+            if (typeof parsed.meta.saveChat === 'boolean') setSaveChat(parsed.meta.saveChat);
+            if (parsed.meta.selectedFormat) setSelectedFormat(parsed.meta.selectedFormat);
+            if (parsed.meta.wordCount) setWordCount(parsed.meta.wordCount);
+          }
+
+          setShowToast({ show: true, message: 'Restored chat from previous session' });
+          setTimeout(() => setShowToast({ show: false, message: '' }), 2000);
         }
-
-        // brief toast to indicate restoration
-        setShowToast({ show: true, message: 'Restored chat from previous session' });
-        setTimeout(() => setShowToast({ show: false, message: '' }), 2000);
+      } catch (e) {
+        console.error('Failed to restore chat draft:', e);
       }
-    } catch (e) {
-      console.error('Failed to restore chat draft:', e);
-    }
+    })();
   }, [loading, currentConversationId, user?.id, getStorageKey]);
 
   useEffect(() => {

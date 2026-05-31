@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getSupabaseClient } from '@/app/lib/supabase';
+import { getSupabaseClient, clearSupabaseStorage } from '@/app/lib/supabase';
 import FeedbackButton from '@/app/components/FeedbackButton';
 import { Mail, Lock, AlertCircle } from 'lucide-react';
 
@@ -21,6 +21,10 @@ export default function LoginPage() {
 
     try {
       const supabase = getSupabaseClient();
+      // Pattern C fix: evict any existing session before signing in so a
+      // previous user's in-memory/storage state cannot bleed into the new one.
+      await supabase.auth.signOut({ scope: 'local' });
+      clearSupabaseStorage();
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -45,6 +49,9 @@ export default function LoginPage() {
 
     try {
       const supabase = getSupabaseClient();
+      // Pattern C fix: evict any existing session before starting the OAuth flow.
+      await supabase.auth.signOut({ scope: 'local' });
+      clearSupabaseStorage();
       // Always use window.location.origin to ensure correct redirect for both localhost and production
       const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/auth/callback` : '/auth/callback';
       const { error: signInError } = await supabase.auth.signInWithOAuth({

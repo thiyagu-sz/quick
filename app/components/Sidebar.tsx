@@ -15,7 +15,7 @@ import {
   Clock,
   Trash2
 } from 'lucide-react';
-import { getSupabaseClient, clearSupabaseClient } from '@/app/lib/supabase';
+import { getSupabaseClient, clearSupabaseClient, clearSupabaseStorage } from '@/app/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import StatusModal from './StatusModal';
@@ -199,33 +199,27 @@ export default function Sidebar({ user }: SidebarProps) {
   const handleSignOut = async () => {
     try {
       const supabase = getSupabaseClient();
-      
-      // Get current user ID before signing out to clear their localStorage
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      
-      // 1. Clear session first
-      await supabase.auth.signOut();
-      
-      // 2. Clear singleton instance
-      clearSupabaseClient();
-      
-      // 3. Clear local state
+
+      // Pattern B fix: scope:'local' signs out this browser only, not all devices.
+      await supabase.auth.signOut({ scope: 'local' });
+
+      // Pattern B fix: wipe every Supabase-owned key so the next login starts clean.
+      clearSupabaseStorage();
+      clearSupabaseClient(); // no-op now, kept for clarity
+
       setChatHistory([]);
       setUserEmail('');
-      
-      // 4. Clear user-specific localStorage data
+
       if (currentUser?.id) {
         try {
           localStorage.removeItem(`ai_chat_draft_${currentUser.id}`);
         } catch (e) { /* ignore */ }
       }
-      
-      // 5. Use hard redirect to ensure zero state leakage and fix "stuck loading" bug
-      // Using window.location.href instead of router.push ensures a fresh browser state
+
       window.location.href = '/login';
     } catch (error) {
       console.error('Error during sign out:', error);
-      // Fallback redirect if something fails
       window.location.href = '/login';
     }
   };

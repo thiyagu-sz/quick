@@ -1,15 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Singleton instance for client-side
-let supabaseInstance: SupabaseClient | null = null;
-
-/**
- * Creates and returns a Supabase client for use in Client Components
- * Uses singleton pattern to ensure consistent session handling
- * The client is configured with proper auth persistence
- * 
- * @returns Supabase client instance
- */
+// Pattern A fix: singleton removed — a fresh client is created on every call.
+// Supabase persists the token in localStorage (storageKey) on its own, so no
+// in-memory singleton is needed. The old singleton caused cross-user contamination
+// because its in-memory JWT outlived the previous user's signOut call.
 export function getSupabaseClient(): SupabaseClient {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -22,46 +16,36 @@ export function getSupabaseClient(): SupabaseClient {
     );
   }
 
-  // Validate URL format
   try {
     new URL(supabaseUrl);
   } catch {
     throw new Error(`Invalid Supabase URL: ${supabaseUrl}. Must be a valid HTTP or HTTPS URL.`);
   }
 
-  // Return existing instance if available (singleton pattern)
-  // This ensures the same client is used throughout the app session
-  if (supabaseInstance) {
-    return supabaseInstance;
-  }
-
-  // Create new client with proper auth configuration
-  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
+  return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
-      // Use localStorage for session storage (default)
       storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-      // Ensure each browser tab shares the same session
       storageKey: 'quicknotes-auth-token',
     },
   });
-
-  return supabaseInstance;
 }
 
-/**
- * Clear the singleton instance (useful for logout)
- * Call this when user signs out to ensure clean state
- */
-export function clearSupabaseClient(): void {
-  supabaseInstance = null;
+// No-op kept for call-site compatibility; singleton has been removed.
+export function clearSupabaseClient(): void {}
+
+// Pattern B/C fix: wipe every Supabase-owned localStorage key so the next
+// sign-in always starts from a clean slate, not a previous user's leftovers.
+export function clearSupabaseStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('sb-') || k.startsWith('supabase') || k === 'quicknotes-auth-token')
+      .forEach(k => localStorage.removeItem(k));
+  } catch { /* ignore */ }
 }
 
-/**
- * Default export for convenience
- * Usage: import supabase from '@/app/lib/supabase'
- */
 export default getSupabaseClient;
 

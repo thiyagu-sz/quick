@@ -1077,25 +1077,46 @@ ${userInput}`,
 
       if (reader) {
         console.log('🔄 Starting to read stream...');
+
+        // Update the streaming assistant message BY ID (not array index) so a state
+        // shift mid-stream can never patch the wrong message (the audit race).
+        const updateAssistant = (patch: Partial<Message>) =>
+          setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, ...patch } : m)));
+
+        // Idle watchdog: if no chunk arrives for IDLE_MS the stream has stalled
+        // (socket open but silent — no [DONE], no close). Abort the reader and
+        // surface a clear message instead of hanging the UI forever.
+        const IDLE_MS = 20000;
+        let idleId: ReturnType<typeof setTimeout> | undefined;
+        const idle = () => new Promise<'__idle__'>((res) => { idleId = setTimeout(() => res('__idle__'), IDLE_MS); });
+
         let streamEnded = false;
         let chunkCount = 0;
         let lineBuffer = ''; // accumulate partial SSE lines across chunk boundaries
         while (true) {
-          const { done, value } = await reader.read();
+          const readPromise = reader.read();
+          readPromise.catch(() => {}); // swallow the rejection if it loses the race and we abort
+          const raced = await Promise.race([readPromise, idle()]);
+          clearTimeout(idleId);
+
+          if (raced === '__idle__') {
+            console.warn(`⏱️ Stream idle > ${IDLE_MS}ms — aborting as stalled`);
+            try { abortControllerRef.current?.abort(); } catch { /* ignore */ }
+            updateAssistant({
+              content: assistantContent
+                ? `${assistantContent}\n\n_(The response stalled. Please try again.)_`
+                : 'The response stalled. Please try again.',
+            });
+            showToastMessage('Response stalled — please try again.');
+            break;
+          }
+
+          const { done, value } = raced as ReadableStreamReadResult<Uint8Array>;
           if (done) {
             console.log('✅ Stream ended. Total chunks:', chunkCount, 'Content length:', assistantContent.length);
             if (!assistantContent) {
               assistantContent = 'No response received from the AI. Please check your API key and try again.';
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  id: messageId,
-                  role: 'assistant',
-                  content: assistantContent,
-                  timestamp: new Date(),
-                };
-                return updated;
-              });
+              updateAssistant({ content: assistantContent });
             }
             // NOTE: The server's flush() handler in /api/chat saves the assistant message.
             // No duplicate save here.
@@ -1120,44 +1141,16 @@ ${userInput}`,
                 if (parsed.error) {
                   console.error('❌ API Error in stream:', parsed.error);
                   assistantContent = `Error: ${parsed.error}`;
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    updated[updated.length - 1] = { 
-                      id: messageId,
-                      role: 'assistant',
-                      content: assistantContent,
-                      timestamp: new Date(),
-                    };
-                    return updated;
-                  });
+                  updateAssistant({ content: assistantContent });
                   streamEnded = true;
                   break;
                 }
                 if (parsed.content) {
                   assistantContent += sanitizeContent(parsed.content);
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    updated[updated.length - 1] = { 
-                      id: messageId,
-                      role: 'assistant',
-                      content: assistantContent,
-                      timestamp: new Date(),
-                    };
-                    return updated;
-                  });
+                  updateAssistant({ content: assistantContent });
                 }
                 if (parsed.sources) {
-                  setMessages((prev) => {
-                    const updated = [...prev];
-                    updated[updated.length - 1] = {
-                      id: messageId,
-                      role: 'assistant',
-                      content: assistantContent,
-                      sources: parsed.sources,
-                      timestamp: new Date(),
-                    };
-                    return updated;
-                  });
+                  updateAssistant({ content: assistantContent, sources: parsed.sources });
                 }
                 // The server sends {conversationId, sources} in its final SSE event.
                 // Capture the ID here so subsequent messages go to the same conversation.

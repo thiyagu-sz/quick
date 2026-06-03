@@ -342,7 +342,7 @@ export default function NotesViewerPage() {
         <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
             <div className="flex items-center gap-3 sm:gap-4">
-              <Link href="/dashboard" className="p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0">
+              <Link href="/dashboard" aria-label="Back to dashboard" className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0">
                 <ArrowLeft className="w-5 h-5 text-gray-600" />
               </Link>
               <div className="min-w-0 flex-1">
@@ -358,7 +358,7 @@ export default function NotesViewerPage() {
               <button
                 onClick={exportToPDF}
                 disabled={!note || exporting}
-                className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 min-h-[44px] border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
               >
                 <FileDown className="w-4 h-4" />
                 <span className="hidden xs:inline">Export</span> PDF
@@ -366,7 +366,7 @@ export default function NotesViewerPage() {
               <button
                 onClick={exportToDOC}
                 disabled={!note || exporting}
-                className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 min-h-[44px] border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 text-sm"
               >
                 <FileDown className="w-4 h-4" />
                 <span className="hidden xs:inline">Export</span> DOC

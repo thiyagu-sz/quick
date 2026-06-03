@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { MessageSquare, Send, AlertCircle, CheckCircle, Loader2, Bug, Lightbulb, Zap, Smile, Settings, Book, HelpCircle } from 'lucide-react';
 
 interface FeedbackData {
@@ -43,6 +43,28 @@ const FEATURE_OPTIONS = [
 ];
 
 export default function FeedbackForm({ userId, userEmail, onClose, onSubmitSuccess }: FeedbackFormProps) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = dialogRef.current;
+    const focusables = node
+      ? Array.from(node.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+      : [];
+    focusables[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose?.(); return; }
+      if (e.key === 'Tab' && focusables.length > 0) {
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [formData, setFormData] = useState<FeedbackData>({
     rating: 5,
     category: 'feature',
@@ -175,16 +197,23 @@ export default function FeedbackForm({ userId, userEmail, onClose, onSubmitSucce
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-      <div className="bg-white border border-gray-200 rounded-t-2xl sm:rounded-2xl shadow-xl max-w-2xl w-full h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-white border border-gray-200 rounded-t-2xl sm:rounded-2xl shadow-xl max-w-2xl w-full h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden flex flex-col"
+      >
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 p-4 sm:p-6 flex items-center justify-between rounded-t-2xl">
           <div className="flex items-center gap-2 sm:gap-3">
             <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
-            <h2 className="text-lg sm:text-2xl font-bold text-gray-900">Share Your Feedback</h2>
+            <h2 id={titleId} className="text-lg sm:text-2xl font-bold text-gray-900">Share Your Feedback</h2>
           </div>
           {onClose && (
             <button
               onClick={onClose}
+              aria-label="Close feedback form"
               className="text-gray-400 hover:text-gray-600 transition-colors p-1 hover:bg-gray-100 rounded-lg"
             >
               ✕

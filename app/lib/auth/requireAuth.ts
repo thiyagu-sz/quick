@@ -64,7 +64,7 @@ export async function requireAuth(request: NextRequest) {
   }
 
   if (authError || !user) {
-    throw new AppError('Unauthorized access. Please log in.', 401, 'UNAUTHORIZED');
+    throw new AppError('Your session has expired. Please log in again.', 401, 'UNAUTHORIZED');
   }
 
   return { user, supabase };

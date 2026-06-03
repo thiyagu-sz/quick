@@ -1,10 +1,17 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Pattern A fix: singleton removed — a fresh client is created on every call.
-// Supabase persists the token in localStorage (storageKey) on its own, so no
-// in-memory singleton is needed. The old singleton caused cross-user contamination
-// because its in-memory JWT outlived the previous user's signOut call.
+// Singleton: Supabase v2 uses navigator.locks (Web Locks API) internally to
+// serialize token refresh. Creating multiple clients with the same storageKey
+// causes each new instance to steal the lock from the previous one, producing
+// "Lock broken by another request with the 'steal' option" console errors.
+// One instance per browser session avoids all lock contention.
+// On sign-out, call clearSupabaseClient() + clearSupabaseStorage() so the
+// next sign-in starts from a clean slate (prevents cross-user contamination).
+let supabaseInstance: SupabaseClient | null = null;
+
 export function getSupabaseClient(): SupabaseClient {
+  if (supabaseInstance) return supabaseInstance;
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -22,7 +29,7 @@ export function getSupabaseClient(): SupabaseClient {
     throw new Error(`Invalid Supabase URL: ${supabaseUrl}. Must be a valid HTTP or HTTPS URL.`);
   }
 
-  return createClient(supabaseUrl, supabaseAnonKey, {
+  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -31,10 +38,13 @@ export function getSupabaseClient(): SupabaseClient {
       storageKey: 'quicknotes-auth-token',
     },
   });
+  return supabaseInstance;
 }
 
-// No-op kept for call-site compatibility; singleton has been removed.
-export function clearSupabaseClient(): void {}
+// Call after sign-out so the next sign-in gets a fresh client with no stale JWT.
+export function clearSupabaseClient(): void {
+  supabaseInstance = null;
+}
 
 // Pattern B/C fix: wipe every Supabase-owned localStorage key so the next
 // sign-in always starts from a clean slate, not a previous user's leftovers.

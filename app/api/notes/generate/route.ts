@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { AiService } from '@/app/lib/ai/aiService';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
+import { acquireInflight, releaseInflight } from '@/app/lib/rateLimiter.redis';
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -25,6 +26,15 @@ export async function GET(req: NextRequest) {
     if (!collectionId) {
       return NextResponse.json({ error: 'collectionId required' }, { status: 400 });
     }
+
+    // Prevent duplicate AI processing when the client polls faster than one generation finishes.
+    // Key is scoped to user+collection so different collections can process concurrently.
+    const lockKey = `notes-gen:${collectionId}`;
+    if (!await acquireInflight(user.id, lockKey, 70)) {
+      return NextResponse.json({ status: 'processing', progress: '…', currentFile: null });
+    }
+
+    try {
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -223,6 +233,10 @@ export async function GET(req: NextRequest) {
       progress: `${completed}/${total}`,
       currentFile,
     });
+
+    } finally {
+      releaseInflight(user.id, lockKey).catch(() => {});
+    }
 
   } catch (err) {
     console.error('[NotesGen] Error:', err);

@@ -4,6 +4,7 @@ import { AiService } from '@/app/lib/ai/aiService';
 import { CONFIG } from '@/app/lib/config';
 import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
+import { acquireInflight, releaseInflight } from '@/app/lib/rateLimiter.redis';
 
 export const maxDuration = 60;
 export const runtime = "nodejs";
@@ -516,6 +517,16 @@ export async function POST(request: NextRequest) {
       throw new AppError('Failed to initialize database client', 500, 'CONFIG_ERROR');
     }
 
+    // Prevent the same user from uploading multiple collections simultaneously.
+    if (!await acquireInflight(user.id, 'upload', 70)) {
+      throw new AppError(
+        'An upload is already in progress for your account. Please wait for it to finish.',
+        429,
+        'INFLIGHT'
+      );
+    }
+    try {
+
     const formData = await request.formData();
     const collectionName = formData.get('collectionName') as string;
     const files = formData.getAll('files') as File[];
@@ -624,14 +635,30 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Return immediately after creating records and storing text
+    // If NOTHING could be extracted, fail loudly (422) instead of a silent 202.
+    // Previously every file could fail extraction and the route still returned
+    // "processing", so the user waited forever for notes that never came.
+    if (uploadedDocuments.length === 0) {
+      return NextResponse.json({
+        error: 'No readable text could be extracted from your file(s). They may be empty, corrupt, image-only scans, or password-protected.',
+        details: extractionErrors,
+      }, { status: 422 });
+    }
+
+    // Partial success: some files stored, some failed. Return 202 but SURFACE the
+    // per-file failures so the client can show which files were skipped.
     return NextResponse.json({
       success: true,
       collectionId: collectionData.id,
       status: "processing",
       message: "Your documents are being processed. Notes will appear shortly.",
-      documents: uploadedDocuments
+      documents: uploadedDocuments,
+      ...(extractionErrors.length > 0 && { errors: extractionErrors }),
     }, { status: 202 });
+
+    } finally {
+      releaseInflight(user.id, 'upload').catch(() => {});
+    }
 
   } catch (error) {
     console.error('Upload route error:', error);

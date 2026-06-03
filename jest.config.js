@@ -28,14 +28,49 @@ module.exports = {
   projects: [
     {
       displayName: 'unit',
-      testMatch: ['app/**/*.test.ts', 'app/lib/**/*.test.ts'],
+      // Fixed 2026-06-02: globs need a <rootDir>/ prefix to match absolute paths,
+      // and projects don't inherit the root preset/transform/moduleNameMapper.
+      testMatch: ['<rootDir>/app/**/*.test.ts'],
       testEnvironment: 'node',
+      preset: 'ts-jest',
+      transform: {
+        '^.+\\.tsx?$': ['ts-jest', { tsconfig: { jsx: 'react-jsx' } }],
+      },
+      moduleNameMapper: {
+        '^@/(.*)$': '<rootDir>/$1',
+      },
+    },
+    {
+      // Audit/integration suite added 2026-06-01. Lives under tests/ (not app/),
+      // so it needs its own project — the projects above only scan app/**.
+      // Only matches *.test.ts here; Playwright specs use the *.spec.ts extension
+      // and are run by playwright.config.ts, never by Jest.
+      displayName: 'audit',
+      testMatch: ['<rootDir>/tests/**/*.test.ts'],
+      testEnvironment: 'node',
+      // Jest projects do NOT inherit the root preset/transform/moduleNameMapper,
+      // so declare them here explicitly (ts-jest + the @/ path alias).
+      preset: 'ts-jest',
+      transform: {
+        '^.+\\.tsx?$': ['ts-jest', { tsconfig: { jsx: 'react-jsx' } }],
+      },
+      moduleNameMapper: {
+        '^@/(.*)$': '<rootDir>/$1',
+      },
     },
     {
       displayName: 'component',
-      testMatch: ['app/**/*.test.tsx', '!app/api/**/*.test.tsx'],
+      // Fixed 2026-06-02: <rootDir>/ prefix + explicit ts-jest/preset/mapper.
+      testMatch: ['<rootDir>/app/**/*.test.tsx', '!<rootDir>/app/api/**/*.test.tsx'],
       testEnvironment: 'jsdom',
       setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
+      preset: 'ts-jest',
+      transform: {
+        '^.+\\.tsx?$': ['ts-jest', { tsconfig: { jsx: 'react-jsx' } }],
+      },
+      moduleNameMapper: {
+        '^@/(.*)$': '<rootDir>/$1',
+      },
     },
   ],
 };

@@ -102,7 +102,10 @@ export class OpenRouterGateway {
     if (!response.ok) {
       const isRetryable = response.status === 429 || response.status >= 500;
       if (isRetryable && attempt < CONFIG.AI.RETRY_ATTEMPTS) {
-        const delay = Math.pow(2, attempt) * 1000; // 1s → 2s
+        // Jitter prevents concurrent retries from all hitting OpenRouter at the same millisecond.
+        const base = Math.pow(2, attempt) * 1000;
+        const jitter = Math.floor(Math.random() * base * 0.5);
+        const delay = base + jitter;
         console.warn(`[OpenRouterGateway] ${response.status} — retry in ${delay}ms`, { model, attempt });
         await new Promise(r => setTimeout(r, delay));
         return this.fetchWithRetry(payload, model, attempt + 1);
@@ -113,7 +116,11 @@ export class OpenRouterGateway {
         statusText: response.statusText,
         body: errorText.substring(0, 300),
       });
-      throw new Error(`OpenRouter ${response.status}: ${response.statusText}`);
+      // Use a distinct prefix on 429 so ErrorHandler maps it to the right user message.
+      const msg = response.status === 429
+        ? 'OpenRouter 429: High demand — please retry in a few seconds'
+        : `OpenRouter ${response.status}: ${response.statusText}`;
+      throw new Error(msg);
     }
 
     return response;

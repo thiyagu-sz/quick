@@ -7,3 +7,13 @@ node_modules/
 dist/
 build/
 *.log
+
+# Test artifacts (added 2026-06-01 audit)
+# tokens.json holds live Supabase JWTs minted by seed-users.mjs — never commit
+tests/load/tokens.json
+playwright-report/
+test-results/
+.k6-summary.json
+
+# Build artifacts
+tsconfig.tsbuildinfo

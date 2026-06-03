@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { AiService } from '@/app/lib/ai/aiService';
 import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
-import { globalRateLimit } from '@/app/lib/rateLimiter.redis';
+import { globalRateLimit, acquireInflight, releaseInflight } from '@/app/lib/rateLimiter.redis';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
 
 // 120s: DeepSeek R1 reasoning (30–90s) + token generation. Must be on Pro plan.
@@ -11,6 +11,13 @@ export const runtime = 'nodejs';
 
 // Configuration
 const MAX_CONTEXT_CHUNKS = 5;
+
+// RAG is OFF until vectors align: the upload pipeline does not populate
+// document_chunks and match_documents() is not deployed, so RAG only added an
+// embedding API call + a failing RPC and returned no context. Flip to true once
+// chunks are populated AND supabase/migrations/match_documents.sql (vector(384))
+// is deployed. // TODO: re-enable RAG once vectors align.
+const RAG_ENABLED = false;
 
 /**
  * RAG: Search for similar document chunks
@@ -45,6 +52,9 @@ async function searchSimilarChunks(
  * Main POST handler
  */
 export async function POST(request: NextRequest) {
+  // Hoisted so the catch block can release the lock if we throw after acquiring it.
+  let inflightUserId: string | null = null;
+
   try {
     // 1. Authentication
     const { user, supabase } = await requireAuth(request);
@@ -57,9 +67,20 @@ export async function POST(request: NextRequest) {
     const limitResult = await globalRateLimit(user.id);
     if (!limitResult.success) {
       throw new AppError(
-        `Rate limit exceeded. Please try again in ${limitResult.resetIn}s.`,
+        `You are sending requests too quickly. Please wait ${limitResult.resetIn}s before trying again.`,
         429,
         'RATE_LIMIT'
+      );
+    }
+
+    // Per-user concurrency guard: one active 120s stream per user prevents
+    // double-connections that each hold Vercel function slots and auth queries.
+    inflightUserId = user.id;
+    if (!await acquireInflight(user.id, 'chat', 130)) {
+      throw new AppError(
+        'You already have a chat request in progress. Please wait for it to complete.',
+        429,
+        'INFLIGHT'
       );
     }
 
@@ -123,12 +144,17 @@ export async function POST(request: NextRequest) {
       ErrorHandler.debug('Created new conversation', { conversationId: activeConversationId });
     }
 
-    // 6. RAG & Context Preparation
-    const embedding = await AiService.generateEmbedding(question);
-    const chunks = await searchSimilarChunks(supabase, user.id, embedding);
-    
-    const context = chunks.map((c: any) => c.content).join('\n\n---\n\n');
-    const sources = Array.from(new Set(chunks.map((c: any) => c.documents?.name || 'Unknown')));
+    // 6. RAG & Context Preparation — skipped while RAG_ENABLED is false.
+    // No embedding call, no match_documents RPC: we answer without document
+    // context instead of paying for an embedding + a failing RPC every message.
+    let context = '';
+    let sources: string[] = [];
+    if (RAG_ENABLED) {
+      const embedding = await AiService.generateEmbedding(question);
+      const chunks = await searchSimilarChunks(supabase, user.id, embedding);
+      context = chunks.map((c: any) => c.content).join('\n\n---\n\n');
+      sources = Array.from(new Set(chunks.map((c: any) => c.documents?.name || 'Unknown')));
+    }
 
     // Use the instruction prompt if provided, otherwise build a default one
     const finalPrompt = instructionPrompt || `You are an elite academic research assistant for QuickNotes.
@@ -198,6 +224,8 @@ Rules:
       },
       async flush(controller) {
         if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+        // Release inflight lock now that the stream is done (success path).
+        releaseInflight(user.id, 'chat').catch(() => {});
 
         // Save assistant message AFTER streaming completes
         if (assistantContent) {
@@ -233,6 +261,8 @@ Rules:
     // interval from running for the remaining maxDuration of the function.
     request.signal.addEventListener('abort', () => {
       if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+      // Release inflight lock on client disconnect so the user isn't blocked.
+      releaseInflight(user.id, 'chat').catch(() => {});
       ErrorHandler.debug('Client disconnected — heartbeat cleared', { conversationId: activeConversationId });
     }, { once: true });
 
@@ -246,6 +276,8 @@ Rules:
     });
 
   } catch (error: any) {
+    // Release inflight lock on any pre-stream error (auth fail, DB error, etc.)
+    if (inflightUserId) releaseInflight(inflightUserId, 'chat').catch(() => {});
     // DEBUG: Log the actual error details
     console.error('[CHAT ROUTE RAW ERROR]', {
       status: error?.status,

@@ -12,11 +12,40 @@ interface StatusModalProps {
 }
 
 export default function StatusModal({ show, type, title, message, onClose }: StatusModalProps) {
+  const titleId = React.useId();
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!show) return;
+    const node = dialogRef.current;
+    const focusables = node
+      ? Array.from(node.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+      : [];
+    focusables[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'Tab' && focusables.length > 0) {
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [show, onClose]);
+
   if (!show) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200"
+      >
         <div className={`flex items-center justify-center w-14 h-14 mx-auto rounded-full mb-4 ${
           type === 'success' ? 'bg-green-100 text-green-600' :
           type === 'error' ? 'bg-red-100 text-red-600' :
@@ -27,7 +56,7 @@ export default function StatusModal({ show, type, title, message, onClose }: Sta
            type === 'error' ? <X className="w-8 h-8" /> :
            <AlertCircle className="w-8 h-8" />}
         </div>
-        <h3 className="text-xl font-bold text-center text-gray-900 mb-2">{title}</h3>
+        <h3 id={titleId} className="text-xl font-bold text-center text-gray-900 mb-2">{title}</h3>
         <p className="text-center text-gray-600 mb-6 text-sm leading-relaxed whitespace-pre-wrap">
           {message}
         </p>

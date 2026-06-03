@@ -153,14 +153,14 @@ export default function LandingPage() {
                 <div className="bg-white rounded-2xl shadow-xl border border-gray-100 w-full h-full p-6 flex flex-col gap-4 transform group-hover:scale-[1.02] transition-transform duration-500">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-2 h-2 rounded-full bg-primary"></div>
-                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Question 1 of 10</span>
+                    <span className="text-xs text-gray-400 font-bold uppercase tracking-wider">Question 1 of 10</span>
                   </div>
                   <p className="text-xs font-bold text-gray-800 leading-relaxed">Which of the following best describes the function of mitochondria in a cell?</p>
                   <div className="flex flex-col gap-2 mt-2">
-                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-[10px] text-gray-600">A) Protein synthesis and transport</div>
-                    <div className="p-2 rounded-lg border border-primary bg-blue-50 text-[10px] text-primary font-bold">B) Primary site of ATP production</div>
-                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-[10px] text-gray-600">C) Storage of genetic information</div>
-                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-[10px] text-gray-600">D) Breakdown of cellular waste</div>
+                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-xs text-gray-600">A) Protein synthesis and transport</div>
+                    <div className="p-2 rounded-lg border border-primary bg-blue-50 text-xs text-primary font-bold">B) Primary site of ATP production</div>
+                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-xs text-gray-600">C) Storage of genetic information</div>
+                    <div className="p-2 rounded-lg border border-gray-100 bg-gray-50 text-xs text-gray-600">D) Breakdown of cellular waste</div>
                   </div>
                 </div>
               </div>
@@ -181,23 +181,23 @@ export default function LandingPage() {
                   <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between">
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-gray-700">Easy</span>
-                      <span className="text-[10px] text-gray-400 font-medium text-left">Concept Check</span>
+                      <span className="text-xs text-gray-400 font-medium text-left">Concept Check</span>
                     </div>
-                    <div className="px-3 py-1 rounded-full bg-green-50 text-green-600 text-[10px] font-bold">Start</div>
+                    <div className="px-3 py-1 rounded-full bg-green-50 text-green-600 text-xs font-bold">Start</div>
                   </div>
                   <div className="bg-white p-4 rounded-2xl shadow-sm border border-blue-100 flex items-center justify-between ring-2 ring-blue-50">
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-gray-700">Medium</span>
-                      <span className="text-[10px] text-blue-500 font-medium text-left">Exam Standard</span>
+                      <span className="text-xs text-blue-500 font-medium text-left">Exam Standard</span>
                     </div>
-                    <div className="px-3 py-1 rounded-full bg-primary text-white text-[10px] font-bold">Start</div>
+                    <div className="px-3 py-1 rounded-full bg-primary text-white text-xs font-bold">Start</div>
                   </div>
                   <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex items-center justify-between opacity-80 scale-95">
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-gray-700">Hard</span>
-                      <span className="text-[10px] text-gray-400 font-medium text-left">Competitive Level</span>
+                      <span className="text-xs text-gray-400 font-medium text-left">Competitive Level</span>
                     </div>
-                    <div className="px-3 py-1 rounded-full bg-gray-100 text-gray-400 text-[10px] font-bold">Locked</div>
+                    <div className="px-3 py-1 rounded-full bg-gray-100 text-gray-400 text-xs font-bold">Locked</div>
                   </div>
                 </div>
               </div>
@@ -220,28 +220,28 @@ export default function LandingPage() {
                     <div className="mt-1 size-1.5 rounded-full bg-primary shrink-0"></div>
                     <div className="space-y-1.5 flex-1">
                       <div className="h-2 w-full bg-gray-100 rounded-full"></div>
-                      <div className="h-2 w-4/5 bg-gray-50 rounded-full text-[8px] flex items-center px-2 font-bold text-gray-400">Key Definitions Extracted</div>
+                      <div className="h-2 w-4/5 bg-gray-50 rounded-full text-xs flex items-center px-2 font-bold text-gray-400">Key Definitions Extracted</div>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="mt-1 size-1.5 rounded-full bg-indigo-400 shrink-0"></div>
                     <div className="space-y-1.5 flex-1">
                       <div className="h-2 w-full bg-gray-100 rounded-full"></div>
-                      <div className="h-2 w-3/4 bg-indigo-50 rounded-full text-[8px] flex items-center px-2 font-bold text-indigo-400">Important Formulas Highlighted</div>
+                      <div className="h-2 w-3/4 bg-indigo-50 rounded-full text-xs flex items-center px-2 font-bold text-indigo-400">Important Formulas Highlighted</div>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="mt-1 size-1.5 rounded-full bg-emerald-400 shrink-0"></div>
                     <div className="space-y-1.5 flex-1">
                       <div className="h-2 w-full bg-gray-100 rounded-full"></div>
-                      <div className="h-2 w-5/6 bg-emerald-50 rounded-full text-[8px] flex items-center px-2 font-bold text-emerald-400">Exam-Focused Bullet Points</div>
+                      <div className="h-2 w-5/6 bg-emerald-50 rounded-full text-xs flex items-center px-2 font-bold text-emerald-400">Exam-Focused Bullet Points</div>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="mt-1 size-1.5 rounded-full bg-purple-400 shrink-0"></div>
                     <div className="space-y-1.5 flex-1">
                       <div className="h-2 w-full bg-gray-100 rounded-full"></div>
-                      <div className="h-2 w-2/3 bg-purple-50 rounded-full text-[8px] flex items-center px-2 font-bold text-purple-400">Structured Topic Breakdown</div>
+                      <div className="h-2 w-2/3 bg-purple-50 rounded-full text-xs flex items-center px-2 font-bold text-purple-400">Structured Topic Breakdown</div>
                     </div>
                   </div>
                 </div>
@@ -266,7 +266,7 @@ export default function LandingPage() {
                     </div>
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-gray-700">PDF Export</span>
-                      <span className="text-[10px] text-gray-400 font-medium">Print Ready</span>
+                      <span className="text-xs text-gray-400 font-medium">Print Ready</span>
                     </div>
                     <Download className="w-4 h-4 text-gray-300 ml-auto" />
                   </div>
@@ -276,7 +276,7 @@ export default function LandingPage() {
                     </div>
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-gray-700">DOCX Export</span>
-                      <span className="text-[10px] text-gray-400 font-medium">Editable</span>
+                      <span className="text-xs text-gray-400 font-medium">Editable</span>
                     </div>
                     <Download className="w-4 h-4 text-gray-300 ml-auto" />
                   </div>
@@ -286,7 +286,7 @@ export default function LandingPage() {
                     </div>
                     <div className="flex flex-col text-left">
                       <span className="text-xs font-bold text-gray-700">Structured Clean Format</span>
-                      <span className="text-[10px] text-gray-400 font-medium">Optimized for reading</span>
+                      <span className="text-xs text-gray-400 font-medium">Optimized for reading</span>
                     </div>
                     <Download className="w-4 h-4 text-gray-300 ml-auto" />
                   </div>

@@ -1,6 +1,54 @@
 import { OpenRouterGateway } from './openrouterGateway';
+import { GeminiGateway } from './geminiGateway';
 import { CONFIG } from '../config';
 import { AppError } from '../errors/errorHandler';
+
+// Route to Gemini when the model name is a Gemini model and the API key is present.
+function isGeminiModel(model: string) {
+  return model.startsWith('gemini') || model.startsWith('google/gemini');
+}
+function useGemini(model: string) {
+  return isGeminiModel(model) && !!process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+}
+
+// Every embedding in this system is 384-dimensional so it fits the
+// document_chunks.embedding VECTOR(384) column and the match_documents(vector(384))
+// RPC. The OpenAI path requests dimensions:384; the fallbacks are 384-dim too.
+// Changing this requires changing the DB column and the SQL function in lockstep.
+const EMBEDDING_DIMENSIONS = 384;
+
+// ── Gemini transient-failure retry ───────────────────────────────────────────
+// The Gemini gateway has no built-in retry/fallback (unlike OpenRouter). Wrap its
+// calls so transient 429/500/502/503 are retried with exponential backoff + jitter
+// (max 2 retries). 400/401/403 are NOT retried.
+const RETRYABLE_GEMINI_STATUS = new Set([429, 500, 502, 503]);
+
+function geminiStatusFromError(err: any): number | null {
+  // GeminiGateway throws Error('Gemini <status>: ...') — parse the EXACT status
+  // token (no loose substring match), so e.g. a "25000ms" timeout is never read
+  // as a 500.
+  const m = /Gemini (\d{3})\b/.exec(err?.message ?? '');
+  return m ? parseInt(m[1], 10) : null;
+}
+
+async function withGeminiRetry<T>(label: string, fn: () => Promise<T>, maxRetries = 2): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      const status = geminiStatusFromError(err);
+      const retryable = status !== null && RETRYABLE_GEMINI_STATUS.has(status);
+      if (!retryable || attempt === maxRetries) throw err; // 400/401/403/non-Gemini → no retry
+      const base = Math.pow(2, attempt) * 500; // 500ms, then 1000ms
+      const delay = base + Math.floor(Math.random() * base * 0.5); // + jitter
+      console.warn(`[AiService] ${label}: Gemini ${status} — retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
 
 /**
  * AI Service configuration
@@ -16,7 +64,7 @@ export interface AiConfig {
 }
 
 const DEFAULT_CONFIG: AiConfig = {
-  model: 'openrouter/auto',
+  model: CONFIG.AI.DEFAULT_MODEL,
   maxTokens: CONFIG.AI.MAX_TOKENS,
   temperature: CONFIG.AI.TEMPERATURE,
   timeout: CONFIG.AI.TIMEOUT,
@@ -90,21 +138,16 @@ export class AiService {
         content: m.content,
       }));
 
-      // Get stream from OpenRouter
-      const streamResponse = await OpenRouterGateway.streamRequest({
-        model: finalConfig.model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an elite academic research assistant for QuickNotes. Provide professional, publication-ready responses.',
-          },
-          ...apiMessages,
-        ],
-        temperature: finalConfig.temperature,
-        max_tokens: finalConfig.maxTokens,
-      });
+      const systemPrompt = 'You are an elite academic research assistant for QuickNotes. Provide professional, publication-ready responses.';
+      const allMessages = [{ role: 'system', content: systemPrompt }, ...apiMessages];
 
-      // Convert Cloudflare stream to SSE format for frontend
+      const streamResponse = useGemini(finalConfig.model)
+        ? await withGeminiRetry('streamChat', () => GeminiGateway.streamRequest({ model: finalConfig.model, messages: allMessages, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens }))
+        : await OpenRouterGateway.streamRequest({ model: finalConfig.model, messages: allMessages as any, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens });
+
+      const gemini = useGemini(finalConfig.model);
+
+      // Convert provider SSE stream → frontend SSE format: data: {"content":"..."}
       return new ReadableStream({
         async start(controller) {
           try {
@@ -132,8 +175,12 @@ export class AiService {
                       continue;
                     }
                     const data = JSON.parse(jsonStr);
-                    if (data.choices?.[0]?.delta?.content) {
-                      const content = data.choices[0].delta.content;
+                    // Gemini: candidates[0].content.parts[0].text
+                    // OpenRouter/OpenAI: choices[0].delta.content
+                    const content = gemini
+                      ? data.candidates?.[0]?.content?.parts?.[0]?.text
+                      : data.choices?.[0]?.delta?.content;
+                    if (content) {
                       controller.enqueue(
                         encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
                       );
@@ -151,8 +198,10 @@ export class AiService {
                 const jsonStr = buffer.trim().slice(6);
                 if (jsonStr !== '[DONE]') {
                   const data = JSON.parse(jsonStr);
-                  if (data.choices?.[0]?.delta?.content) {
-                    const content = data.choices[0].delta.content;
+                  const content = gemini
+                    ? data.candidates?.[0]?.content?.parts?.[0]?.text
+                    : data.choices?.[0]?.delta?.content;
+                  if (content) {
                     controller.enqueue(
                       encoder.encode(`data: ${JSON.stringify({ content })}\n\n`)
                     );
@@ -211,18 +260,14 @@ export class AiService {
         content: m.content,
       }));
 
-      const content = await OpenRouterGateway.complete({
-        model: finalConfig.model,
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert study guide creator. Create concise, focused study notes.',
-          },
-          ...apiMessages,
-        ],
-        temperature: finalConfig.temperature,
-        max_tokens: finalConfig.maxTokens,
-      });
+      const completionMessages = [
+        { role: 'system', content: 'You are an expert study guide creator. Create concise, focused study notes.' },
+        ...apiMessages,
+      ];
+
+      const content = useGemini(finalConfig.model)
+        ? await withGeminiRetry('complete', () => GeminiGateway.complete({ model: finalConfig.model, messages: completionMessages, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens }))
+        : await OpenRouterGateway.complete({ model: finalConfig.model, messages: completionMessages as any, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens });
 
       console.log('[AiService] Completion successful', {
         contentLength: content.length,
@@ -249,7 +294,7 @@ export class AiService {
           const h = ((acc << 5) - acc) + char.charCodeAt(0);
           return h & h;
         }, 0);
-        return new Array(384)
+        return new Array(EMBEDDING_DIMENSIONS)
           .fill(0)
           .map((_, i) => Math.sin((hash + i) * 0.1) * 0.1);
       };
@@ -269,6 +314,10 @@ export class AiService {
           body: JSON.stringify({
             model: 'text-embedding-3-small',
             input: text,
+            // Request 384-dim output so it matches the document_chunks column and
+            // the match_documents(vector(384)) RPC. text-embedding-3 models support
+            // shortening via this parameter.
+            dimensions: EMBEDDING_DIMENSIONS,
           }),
           signal: AbortSignal.timeout(15000),
         });
@@ -285,6 +334,14 @@ export class AiService {
           return generateFallbackEmbedding(text);
         }
 
+        // Guard: a wrong-dimension vector would corrupt document_chunks / break
+        // match_documents. If the provider ever returns a different size, use the
+        // (correctly-sized) fallback rather than storing a mismatched vector.
+        if (embedding.length !== EMBEDDING_DIMENSIONS) {
+          console.warn(`[AiService] OpenAI returned ${embedding.length} dims, expected ${EMBEDDING_DIMENSIONS} — using fallback`);
+          return generateFallbackEmbedding(text);
+        }
+
         return embedding;
       } catch (error) {
         console.warn('[AiService] Embedding error, using fallback:', (error as Error).message);
@@ -292,7 +349,7 @@ export class AiService {
       }
     } catch (error) {
       console.warn('[AiService] Unexpected embedding error');
-      return new Array(384).fill(0);
+      return new Array(EMBEDDING_DIMENSIONS).fill(0);
     }
   }
 }

@@ -20,14 +20,21 @@ export class AppError extends Error {
  * Maps technical errors to user-friendly SaaS messages
  */
 const ERROR_MAP: Record<string, string> = {
-  '429': "The AI model is currently busy. Please try again in a moment.",
-  'RATE_LIMIT': "The AI model is currently busy. Please try again in a moment.",
-  'TIMEOUT': "The AI model is currently busy. Please try again in a moment.",
-  '401': "Our AI service is temporarily unavailable.",
-  'UNAUTHORIZED': "Our AI service is temporarily unavailable.",
-  '500': "Our AI service is temporarily unavailable.",
-  'ECONNREFUSED': "Our AI service is temporarily unavailable.",
-  'ABORT_ERROR': "The AI model is currently busy. Please try again in a moment.",
+  // AI provider busy (OpenRouter 429) — distinct from the user's own rate limit
+  '429': "The AI is busy right now. Please retry in a few seconds.",
+  // User's own rate limit is an AppError with a specific message; this catches
+  // any other RATE_LIMIT strings that slip through as plain Errors
+  'RATE_LIMIT': "You are sending requests too quickly. Please wait before trying again.",
+  // Timed out waiting for the AI — likely a very long document
+  'TIMEOUT': "That took too long. Try a shorter question or document.",
+  'ABORT_ERROR': "That took too long. Try a shorter question or document.",
+  // Session / auth
+  '401': "Your session has expired. Please log in again.",
+  'UNAUTHORIZED': "Your session has expired. Please log in again.",
+  // DB / infra errors
+  'DB_ERROR': "Service is under heavy load. Please try again in a moment.",
+  '500': "Service is temporarily unavailable. Please try again.",
+  'ECONNREFUSED': "Service is temporarily unavailable. Please try again.",
 };
 
 /**
@@ -82,18 +89,13 @@ export class ErrorHandler {
       message = error.message;
       code = error.code || 'APP_ERROR';
     } else {
-      // Map based on message or code
-      const errorStr = `${error.message || ''} ${error.code || ''}`.toUpperCase();
-      
-      for (const [key, val] of Object.entries(ERROR_MAP)) {
-        if (errorStr.includes(key)) {
-          message = val;
-          code = key;
-          if (key === '429' || key === 'RATE_LIMIT') statusCode = 429;
-          if (key === '401' || key === 'UNAUTHORIZED') statusCode = 401;
-          break;
-        }
-      }
+      // Precise classification — see classifyPlainError(). No loose substring
+      // matching on status codes (which previously made a "25000ms" timeout match
+      // "500"), and timeout/abort is checked BEFORE any 5xx classification.
+      const mapped = ErrorHandler.classifyPlainError(error);
+      statusCode = mapped.statusCode;
+      message = mapped.message;
+      code = mapped.code;
     }
 
     // In production, NEVER expose raw error details to the client
@@ -107,5 +109,55 @@ export class ErrorHandler {
       },
       { status: statusCode }
     );
+  }
+
+  /**
+   * Classify a non-AppError into { statusCode, message, code } WITHOUT loose
+   * substring matching on status codes. Precedence:
+   *   1) abort / timeout   (checked BEFORE any 5xx classification)
+   *   2) exact error.code  (RATE_LIMIT / UNAUTHORIZED / DB_ERROR / ECONN…)
+   *   3) numeric error.status / statusCode, else a precise (word-boundaried)
+   *      status token from the message — never matches digits inside "25000".
+   *   4) generic 500
+   */
+  private static classifyPlainError(error: any): { statusCode: number; message: string; code: string } {
+    const name = String(error?.name || '');
+    const rawCode = String(error?.code || '');
+    const msg = String(error?.message || '');
+    const numericStatus =
+      typeof error?.status === 'number' ? error.status
+      : typeof error?.statusCode === 'number' ? error.statusCode
+      : null;
+
+    // 1) Abort / timeout FIRST.
+    if (name === 'AbortError' || rawCode === 'ABORT_ERROR') {
+      return { statusCode: 500, message: ERROR_MAP['ABORT_ERROR'], code: 'ABORT_ERROR' };
+    }
+    if (rawCode === 'TIMEOUT' || rawCode === 'ETIMEDOUT' || /\b(timed out|timeout)\b/i.test(msg)) {
+      return { statusCode: 500, message: ERROR_MAP['TIMEOUT'], code: 'TIMEOUT' };
+    }
+
+    // 2) Exact code matches — no substring search.
+    if (rawCode === 'RATE_LIMIT') return { statusCode: 429, message: ERROR_MAP['RATE_LIMIT'], code: 'RATE_LIMIT' };
+    if (rawCode === 'UNAUTHORIZED') return { statusCode: 401, message: ERROR_MAP['401'], code: 'UNAUTHORIZED' };
+    if (rawCode === 'ECONNREFUSED' || rawCode === 'ENOTFOUND') return { statusCode: 500, message: ERROR_MAP['ECONNREFUSED'], code: rawCode };
+    if (rawCode === 'DB_ERROR') return { statusCode: 500, message: ERROR_MAP['DB_ERROR'], code: 'DB_ERROR' };
+
+    // 3) Numeric status (object field preferred; else a precise token in the message).
+    const status = numericStatus ?? ErrorHandler.statusFromMessage(msg);
+    if (status !== null) {
+      if (status === 429) return { statusCode: 429, message: ERROR_MAP['429'], code: '429' };
+      if (status === 401 || status === 403) return { statusCode: 401, message: ERROR_MAP['401'], code: String(status) };
+      if (status >= 500) return { statusCode: status, message: ERROR_MAP['500'], code: String(status) };
+    }
+
+    // 4) Default — never leak internals.
+    return { statusCode: 500, message: 'An unexpected error occurred. Please try again.', code: 'INTERNAL_ERROR' };
+  }
+
+  /** Extract a standalone 4xx/5xx status token from a message (word-boundaried). */
+  private static statusFromMessage(msg: string): number | null {
+    const m = /\b([45]\d{2})\b/.exec(msg);
+    return m ? parseInt(m[1], 10) : null;
   }
 }

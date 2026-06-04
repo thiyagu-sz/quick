@@ -2,6 +2,7 @@ import { OpenRouterGateway } from './openrouterGateway';
 import { GeminiGateway } from './geminiGateway';
 import { CONFIG } from '../config';
 import { AppError } from '../errors/errorHandler';
+import { Semaphore, AcquireTimeoutError } from './semaphore';
 
 // Route to Gemini when the model name is a Gemini model and the API key is present.
 function isGeminiModel(model: string) {
@@ -73,6 +74,19 @@ const DEFAULT_CONFIG: AiConfig = {
   initialRetryDelay: 1000,
 };
 
+// ── Outbound AI concurrency cap (per instance) ───────────────────────────────
+// Enforces CONFIG.AI.CONCURRENCY_LIMIT, which was previously defined but never
+// used. Without it, two concurrent users fan out to unbounded OpenRouter streams
+// → upstream 429s → the shared circuit breaker opens → 500s for everyone. We hold
+// a permit for the full life of each AI call (the whole stream, not just its
+// headers) and shed overflow as a clean 429 once the short wait budget is spent.
+const aiSemaphore = new Semaphore(CONFIG.AI.CONCURRENCY_LIMIT);
+const AI_ACQUIRE_TIMEOUT_MS = parseInt(process.env.AI_ACQUIRE_TIMEOUT_MS || '8000', 10);
+
+function aiBusyError(): AppError {
+  return new AppError('The AI is busy right now. Please retry in a few seconds.', 429, 'AI_BUSY');
+}
+
 /**
  * Metadata attached to all requests for observability
  */
@@ -125,6 +139,20 @@ export class AiService {
   ): Promise<ReadableStream> {
     const finalConfig = { ...DEFAULT_CONFIG, ...config };
     const encoder = new TextEncoder();
+
+    // Acquire a concurrency permit BEFORE the try so an overflow (acquire timeout)
+    // throws AI_BUSY straight to the route → clean 429, not a swallowed error
+    // stream. The permit is held for the whole stream and freed when it ends.
+    try {
+      await aiSemaphore.acquire(AI_ACQUIRE_TIMEOUT_MS);
+    } catch (err) {
+      if (err instanceof AcquireTimeoutError) throw aiBusyError();
+      throw err;
+    }
+    let permitReleased = false;
+    const releasePermit = () => {
+      if (!permitReleased) { permitReleased = true; aiSemaphore.release(); }
+    };
 
     try {
       console.log('[AiService] Streaming via OpenRouter', {
@@ -221,10 +249,20 @@ export class AiService {
               encoder.encode(`data: ${JSON.stringify({ error: safeMessage })}\n\n`)
             );
             controller.close();
+          } finally {
+            // Free the concurrency permit once the upstream stream is drained
+            // (success or error), so the next queued user can proceed.
+            releasePermit();
           }
+        },
+        cancel() {
+          releasePermit();
         },
       });
     } catch (error: any) {
+      // Release on init failure, then re-raise AI_BUSY so the route returns 429.
+      releasePermit();
+      if (error instanceof AppError && error.code === 'AI_BUSY') throw error;
       console.error('[AiService] Stream initialization failed:', error.message);
       return new ReadableStream({
         start(controller) {
@@ -265,9 +303,14 @@ export class AiService {
         ...apiMessages,
       ];
 
-      const content = useGemini(finalConfig.model)
-        ? await withGeminiRetry('complete', () => GeminiGateway.complete({ model: finalConfig.model, messages: completionMessages, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens }))
-        : await OpenRouterGateway.complete({ model: finalConfig.model, messages: completionMessages as any, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens });
+      // Hold a concurrency permit for the duration of the upstream call; overflow
+      // beyond the short wait budget is shed as AI_BUSY (429), not a 500.
+      const content = await aiSemaphore.run(
+        () => useGemini(finalConfig.model)
+          ? withGeminiRetry('complete', () => GeminiGateway.complete({ model: finalConfig.model, messages: completionMessages, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens }))
+          : OpenRouterGateway.complete({ model: finalConfig.model, messages: completionMessages as any, temperature: finalConfig.temperature, max_tokens: finalConfig.maxTokens }),
+        AI_ACQUIRE_TIMEOUT_MS,
+      );
 
       console.log('[AiService] Completion successful', {
         contentLength: content.length,
@@ -275,6 +318,7 @@ export class AiService {
 
       return content;
     } catch (error: any) {
+      if (error instanceof AcquireTimeoutError) throw aiBusyError();
       console.error('[AiService] Completion failed:', error.message);
       const safeMessage = this.getSafeUserMessage(error);
       throw new AppError(safeMessage, 500, 'AI_ERROR', error);

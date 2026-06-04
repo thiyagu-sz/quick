@@ -59,6 +59,24 @@ function isCircuitOpen(): boolean {
   }
   return false;
 }
+
+// A 429 from OpenRouter means "busy / rate-limited" — expected when several users
+// stream at once and already retried with backoff inside fetchWithRetry. It must
+// NOT count toward the circuit breaker: otherwise two concurrent users hitting the
+// upstream concurrency cap would trip the (shared, per-instance) breaker and turn
+// transient 429s into 30s of hard 500s for EVERYONE on that Lambda. Only genuine
+// outages (5xx / network / timeout) should open the circuit.
+function isBusyError(err: any): boolean {
+  if (err?.status === 429) return true;
+  const msg = String(err?.message ?? '');
+  return /\b429\b/.test(msg) || /high demand/i.test(msg);
+}
+
+// Record a failed attempt against the breaker, skipping "busy" (429) responses.
+function recordFailureUnlessBusy(err: any) {
+  if (isBusyError(err)) return;
+  recordFailure();
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class OpenRouterGateway {
@@ -152,11 +170,11 @@ export class OpenRouterGateway {
           recordSuccess();
           return fallbackResponse;
         } catch (fallbackError: any) {
-          recordFailure();
+          recordFailureUnlessBusy(fallbackError);
           throw fallbackError;
         }
       }
-      recordFailure();
+      recordFailureUnlessBusy(primaryError);
       throw primaryError;
     }
   }

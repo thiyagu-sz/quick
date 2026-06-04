@@ -48,6 +48,9 @@ module.exports = {
       displayName: 'audit',
       testMatch: ['<rootDir>/tests/**/*.test.ts'],
       testEnvironment: 'node',
+      // Sets dummy env vars BEFORE any module import (modules like OpenRouterGateway
+      // read env at load time). setupFiles runs earlier than setupFilesAfterEnv.
+      setupFiles: ['<rootDir>/tests/setup.audit.js'],
       // Jest projects do NOT inherit the root preset/transform/moduleNameMapper,
       // so declare them here explicitly (ts-jest + the @/ path alias).
       preset: 'ts-jest',

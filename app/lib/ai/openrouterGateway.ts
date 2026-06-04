@@ -106,9 +106,11 @@ export class OpenRouterGateway {
   ): Promise<Response> {
     console.log('[OpenRouterGateway] Request', { model, attempt, stream: payload.stream });
 
-    // Streaming: 90s to accommodate DeepSeek R1's chain-of-thought reasoning phase
-    // (30–90s before first output token). Non-streaming (notes): 35s is sufficient.
-    const timeoutMs = payload.stream ? 90000 : 35000;
+    // The streaming timeout must stay UNDER the Vercel function cap (60s on Hobby)
+    // so the fetch aborts with a clean, mappable error instead of the platform
+    // hard-killing the function mid-stream. With a fast (non-reasoning) model the
+    // first tokens arrive in 1–3s, so 55s is ample. Non-streaming (notes): 35s.
+    const timeoutMs = payload.stream ? 55000 : 35000;
 
     const response = await fetch(this.baseUrl, {
       method: 'POST',

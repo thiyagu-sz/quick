@@ -5,8 +5,11 @@ import { ErrorHandler, AppError } from '@/app/lib/errors/errorHandler';
 import { globalRateLimit, acquireInflight, releaseInflight } from '@/app/lib/rateLimiter.redis';
 import { requireAuth } from '@/app/lib/auth/requireAuth';
 
-// 120s: DeepSeek R1 reasoning (30–90s) + token generation. Must be on Pro plan.
-export const maxDuration = 120;
+// Vercel Hobby caps function duration at 60s (with Fluid Compute; ~10s without),
+// and silently clamps anything higher — so declaring 120 does nothing on Hobby.
+// Pair this with a FAST model (see config.ts) so streams finish under the cap.
+// Raise to 120/300 only on Pro with a slow/reasoning model.
+export const maxDuration = 60;
 export const runtime = 'nodejs';
 
 // Configuration
